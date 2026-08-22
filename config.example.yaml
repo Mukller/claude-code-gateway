@@ -1,0 +1,72 @@
+server:
+  listen: ":8090"
+  # upstream_timeout: 10m
+
+auth:
+  require_auth: true
+  tokens:
+    - "${GATEWAY_TOKEN:?set GATEWAY_TOKEN env var}"
+    # - "ccg-second-token-for-another-device"
+  admin_token: "${GATEWAY_ADMIN_TOKEN:-ccg-admin-token}"
+
+rate_limit_rpm: 0
+
+logging:
+  file: "data/usage.jsonl"
+  ring_size: 500
+
+providers:
+  # 9router (OpenAI-совместимый агрегатор, модели подтягиваются автоматически)
+  - name: nine-router
+    type: openai
+    base_url: "https://9router.kitory.lol/v1"
+    keys:
+      - "${NINE_ROUTER_KEY}"
+    timeout: 300s
+    discover_models: true
+    refresh_interval: 15m
+    models: []
+
+  # Прямой Anthropic — раскомментируй и задай ANTHROPIC_API_KEY
+  # - name: anthropic
+  #   type: anthropic
+  #   base_url: "https://api.anthropic.com"
+  #   keys:
+  #     - "${ANTHROPIC_API_KEY}"
+  #   timeout: 300s
+
+  # Любой Anthropic-совместимый прокси (9router в этом режиме, CLIProxyAPI, ...)
+  # - name: nine-router-compat
+  #   type: anthropic-compat
+  #   base_url: "https://9router.kitory.lol"
+  #   auth_style: bearer          # или x-api-key
+  #   keys:
+  #     - "${NINE_ROUTER_KEY}"
+  #   timeout: 300s
+
+routing:
+  alias_claude_prefix: true
+  default_chain:
+    - nine-router
+  rules:
+    # model "anthropic/claude-*" уходит напрямую в Anthropic (если провайдер включён)
+    # - prefix: "anthropic/"
+    #   strip_prefix: true
+    #   chain: [anthropic]
+
+pricing:
+  - pattern: "claude-opus*"
+    input_per_mtok: 15.0
+    output_per_mtok: 75.0
+    cache_read_per_mtok: 1.5
+    cache_write_per_mtok: 18.75
+  - pattern: "claude-sonnet*"
+    input_per_mtok: 3.0
+    output_per_mtok: 15.0
+    cache_read_per_mtok: 0.3
+    cache_write_per_mtok: 3.75
+  - pattern: "claude-haiku*"
+    input_per_mtok: 0.8
+    output_per_mtok: 4.0
+    cache_read_per_mtok: 0.08
+    cache_write_per_mtok: 1.0

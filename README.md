@@ -1,0 +1,146 @@
+# claude-code-gateway
+
+Лёгкий гейтвей на Go для **Claude Code**: единая точка входа в стиле Anthropic Messages API с
+мультипровайдером, ротацией ключей, фолбэком между провайдерами, логами и подсчётом стоимости.
+Идея и набор фич вдохновлены [OmniRoute](https://github.com/diegosouzapw/OmniRoute), реализация — своя,
+только stdlib + yaml.
+
+## Возможности
+
+- **Anthropic-совместимый API**: `/v1/messages` (streaming SSE + non-streaming), `/v1/messages/count_tokens`, `/v1/models`
+- **Типы провайдеров**:
+  - `anthropic` — прямой api.anthropic.com (passthrough)
+  - `anthropic-compat` — любой Anthropic-совместимый прокси (свой base_url, bearer/x-api-key)
+  - `openai` — OpenAI-совместимые бэкенды (9router, OpenRouter, DeepSeek, GLM, Kimi, Ollama...) с полным
+    переводом протокола туда-обратно, включая потоковый SSE
+- **Ротация ключей**: несколько ключей на провайдера, round-robin, cooldown при 401/403/429/5xx с экспоненциальным backoff
+- **Фолбэк-цепочки**: модель → список целей; при сбое ключа/провайдера запрос идёт дальше
+- **Маршрутизация по префиксу**: правила вида `anthropic/* → provider anthropic`
+- **Model discovery**: список моделей подтягивается с upstream (`/v1/models`) автоматически
+- **claude/ алиасы**: дублирует модели под `claude/<id>`, чтобы они появлялись в родном пикере моделей Claude Code
+  (`CLAUDE_CODE_ENABLE_GATEWAY_MODEL_DISCOVERY=1`)
+- **Логи и стоимость**: каждая запись — токены, latency, статус, оценка стоимости в USD; JSONL-файл + агрегаты
+- **Rate limit**, admin-API (`/admin/stats`, `/admin/logs`), healthcheck
+
+## Быстрый старт
+
+```bash
+cp .env.example .env        # вставь NINE_ROUTER_KEY и свои токены
+cp config.example.yaml config.yaml   # при необходимости поправь провайдеров
+
+docker compose up -d --build
+# или локально:
+go run ./cmd/gateway -config config.yaml
+```
+
+## Подключение Claude Code
+
+Claude Code указывают на гейтвей переменными окружения (**без** `/v1` в base URL):
+
+```bash
+export ANTHROPIC_BASE_URL=http://localhost:8090
+export ANTHROPIC_AUTH_TOKEN=ccg-local-dev-token          # GATEWAY_TOKEN из .env
+export CLAUDE_CODE_ENABLE_GATEWAY_MODEL_DISCOVERY=1      # модели из /v1/models в пикере /model
+claude
+```
+
+Модели без префикса `claude*` не показываются в нативном пикере Claude Code, но доступны через
+алиасы `claude/<id>` (включены по умолчанию, см. `routing.alias_claude_prefix`) либо через
+`ANTHROPIC_MODEL=<id>`.
+
+## Конфигурация
+
+Все строковые значения поддерживают `${VAR}` и `${VAR:-default}` (подстановка из окружения).
+
+```yaml
+server:
+  listen: ":8090"
+
+auth:
+  tokens: ["${GATEWAY_TOKEN}"]     # чем клиент представляется гейтвею
+  admin_token: "${GATEWAY_ADMIN_TOKEN}"
+  allow_anon: false                # true = пускать всех (только для локальных тестов)
+
+rate_limit_rpm: 0                  # 0 = выключен
+
+providers:
+  - name: nine-router              # любое имя, на него ссылаются chain/rules
+    type: openai                   # anthropic | anthropic-compat | openai
+    base_url: "https://9router.kitory.lol/v1"
+    keys: ["${NINE_ROUTER_KEY}"]   # сколько угодно ключей — ротация включится сама
+    discover_models: true          # тянуть каталог моделей с upstream
+    refresh_interval: 15m
+    timeout: 300s
+
+routing:
+  alias_claude_prefix: true
+  default_chain: [nine-router]     # куда идут все неразобранные модели
+  rules:
+    - prefix: "anthropic/"         # model "anthropic/claude-*" -> провайдер anthropic
+      strip_prefix: true
+      chain: [anthropic]
+
+pricing:                           # USD за 1M токенов; pattern = glob
+  - pattern: "claude-sonnet*"
+    input_per_mtok: 3.0
+    output_per_mtok: 15.0
+    cache_read_per_mtok: 0.3
+    cache_write_per_mtok: 3.75
+```
+
+### Поведение ретраев
+
+| Статус | Действие |
+|---|---|
+| 401/403 | ключ в cooldown 10 минут, пробуем следующий ключ/провайдера |
+| 408/409/429/500/502/503/504/529 | cooldown с экспон. backoff (10s..5m), пробуем дальше |
+| прочие 4xx | ошибка отдаётся клиенту как есть (фатально) |
+| сеть | то же, что soft-fail |
+
+Бюджет попыток на запрос: `retry.max_attempts` (по умолчанию 8).
+
+## Админка и наблюдение
+
+```bash
+curl http://localhost:8090/healthz
+curl -H "x-api-key: ccg-admin-token" http://localhost:8090/admin/stats
+curl -H "x-api-key: ccg-admin-token" "http://localhost:8090/admin/logs?limit=20"
+tail -f data/usage.jsonl
+```
+
+Стоимость считается по таблице `pricing` (первый совпавший паттерн). Модели вне таблицы — стоимость 0,
+токены всё равно логируются. Правь цены под свой стек.
+
+## 9router
+
+В конфиге из коробки подключён 9router (`nine-router`). Он OpenAI-совместимый: модели подтягиваются
+автоматически после первого запуска. Если каталог пуст или провайдер ожидает Anthropic-протокол —
+переключи тип на `anthropic-compat` (пример закомментирован в `config.example.yaml`).
+
+## Разработка
+
+```bash
+make test      # go test ./...
+make vet       # go vet ./...
+make run       # локальный запуск
+make docker-up # сборка+запуск в docker
+```
+
+Структура:
+
+```
+cmd/gateway          точка входа
+internal/core        типы Anthropic/OpenAI + трансляция протоколов (req/resp/SSE)
+internal/provider    пул ключей (ротация), исполнение запросов, роутинг-реестр
+internal/server      HTTP: /v1/messages, /v1/models, count_tokens, админка
+internal/logstore    JSONL-лог + агрегаты (день/модель/провайдер)
+internal/pricing     glob-таблица цен, расчёт стоимости
+internal/ratelimit   простой лимитер RPM
+internal/config      YAML + ${ENV}
+```
+
+## Roadmap
+
+- Bedrock/Vertex провайдеры (SigV4/OAuth)
+- Дашборд UI поверх /admin/stats
+- stream_options.include_usage для точных токенов у openai-бэкендов

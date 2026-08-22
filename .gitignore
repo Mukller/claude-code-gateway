@@ -1,0 +1,9 @@
+.env
+config.yaml
+data/
+bin/
+*.exe
+*.test
+
+gateway*.log
+req.json

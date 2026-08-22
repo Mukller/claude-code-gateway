@@ -1,0 +1,15 @@
+services:
+  gateway:
+    build: .
+    container_name: cc-gateway
+    restart: unless-stopped
+    ports:
+      - "8090:8090"
+    environment:
+      GATEWAY_TOKEN: ${GATEWAY_TOKEN:-ccg-local-dev-token}
+      GATEWAY_ADMIN_TOKEN: ${GATEWAY_ADMIN_TOKEN:-ccg-admin-token}
+      NINE_ROUTER_KEY: ${NINE_ROUTER_KEY}
+      ANTHROPIC_API_KEY: ${ANTHROPIC_API_KEY:-}
+    volumes:
+      - ./config.yaml:/app/config.yaml:ro
+      - ./data:/app/data
