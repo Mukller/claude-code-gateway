@@ -12,7 +12,13 @@
   - `anthropic` — прямой api.anthropic.com (passthrough)
   - `anthropic-compat` — любой Anthropic-совместимый прокси (свой base_url, bearer/x-api-key)
   - `openai` — OpenAI-совместимые бэкенды (9router, OpenRouter, DeepSeek, GLM, Kimi, Ollama...) с полным
-    переводом протокола туда-обратно, включая потоковый SSE
+    переводом протокола туда-обратно, включая потоковый SSE; опция `send_stream_options` для точного usage
+  - `bedrock` — AWS Bedrock (InvokeModel / invoke-with-response-stream): SigV4-подпись из stdlib,
+    декодирование бинарного event-stream, ключ формата `AKID:SECRET[:SESSION_TOKEN]`
+  - `vertex` — Google Vertex AI (`rawPredict`/`streamRawPredict`, нативный Anthropic-формат):
+    Express API-key (`?key=`) или bearer-токен сервис-аккаунта
+- **Веб-дашборд** `/admin/dashboard`: карточки за сегодня, разбивка по провайдерам/моделям,
+  лента последних запросов с ошибками, автообновление
 - **Ротация ключей**: несколько ключей на провайдера, round-robin, cooldown при 401/403/429/5xx с экспоненциальным backoff
 - **Фолбэк-цепочки**: модель → список целей; при сбое ключа/провайдера запрос идёт дальше
 - **Маршрутизация по префиксу**: правила вида `anthropic/* → provider anthropic`
@@ -21,6 +27,8 @@
   (`CLAUDE_CODE_ENABLE_GATEWAY_MODEL_DISCOVERY=1`)
 - **Логи и стоимость**: каждая запись — токены, latency, статус, оценка стоимости в USD; JSONL-файл + агрегаты
 - **Rate limit**, admin-API (`/admin/stats`, `/admin/logs`), healthcheck
+- **Лаунчер**: `gateway -launch -- "твои флаги claude"` — поднимает гейтвей и стартует Claude Code
+  с уже прописанными env
 
 ## Быстрый старт
 
@@ -101,11 +109,20 @@ pricing:                           # USD за 1M токенов; pattern = glob
 
 ## Админка и наблюдение
 
+Дашборд: **http://localhost:8090/admin/dashboard** — введи `GATEWAY_TOKEN` или
+`GATEWAY_ADMIN_TOKEN` (сохраняется в localStorage, автообновление 5с).
+
 ```bash
 curl http://localhost:8090/healthz
 curl -H "x-api-key: ccg-admin-token" http://localhost:8090/admin/stats
 curl -H "x-api-key: ccg-admin-token" "http://localhost:8090/admin/logs?limit=20"
 tail -f data/usage.jsonl
+```
+
+Лаунчер (поднимает гейтвей и сразу запускает Claude Code с нужными env):
+
+```bash
+go run ./cmd/gateway -launch -config config.yaml -- --resume
 ```
 
 Стоимость считается по таблице `pricing` (первый совпавший паттерн). Модели вне таблицы — стоимость 0,
@@ -129,18 +146,18 @@ make docker-up # сборка+запуск в docker
 Структура:
 
 ```
-cmd/gateway          точка входа
-internal/core        типы Anthropic/OpenAI + трансляция протоколов (req/resp/SSE)
-internal/provider    пул ключей (ротация), исполнение запросов, роутинг-реестр
-internal/server      HTTP: /v1/messages, /v1/models, count_tokens, админка
-internal/logstore    JSONL-лог + агрегаты (день/модель/провайдер)
-internal/pricing     glob-таблица цен, расчёт стоимости
-internal/ratelimit   простой лимитер RPM
-internal/config      YAML + ${ENV}
+cmd/gateway             точка входа + лаунчер claude
+internal/core           типы Anthropic/OpenAI, трансляция протоколов (req/resp/SSE), сборщики стримов
+internal/provider       пул ключей, исполнение запросов, роутинг; SigV4 и event-stream для Bedrock
+internal/server         HTTP: /v1/messages, /v1/models, админка + встроенный дашборд
+internal/logstore       JSONL-лог + агрегаты (день/модель/провайдер)
+internal/pricing        glob-таблица цен, расчёт стоимости
+internal/ratelimit      простой лимитер RPM
+internal/config         YAML + ${ENV}
 ```
 
 ## Roadmap
 
-- Bedrock/Vertex провайдеры (SigV4/OAuth)
-- Дашборд UI поверх /admin/stats
-- stream_options.include_usage для точных токенов у openai-бэкендов
+- Дашборд: графики по часам
+- OAuth-рефреш токенов сервис-аккаунта Vertex из коробки
+- Кэширование ответов

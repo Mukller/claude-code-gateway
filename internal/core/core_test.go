@@ -206,6 +206,75 @@ func TestEstimateTokens(t *testing.T) {
 	}
 }
 
+func TestCollectOpenAIStream(t *testing.T) {
+	src := strings.Join([]string{
+		`data: {"model":"up","choices":[{"index":0,"delta":{"role":"assistant"}}]}`,
+		``,
+		`data: {"choices":[{"index":0,"delta":{"content":"he"}}]}`,
+		`data: {"choices":[{"index":0,"delta":{"content":"llo"}}]}`,
+		`data: {"choices":[{"index":0,"delta":{"tool_calls":[{"index":0,"id":"c1","function":{"name":"f","arguments":""}}]}}]}`,
+		`data: {"choices":[{"index":0,"delta":{"tool_calls":[{"index":0,"function":{"arguments":"{}"}}]}}],"usage":{"prompt_tokens":7,"completion_tokens":9}}`,
+		`data: {"choices":[{"index":0,"delta":{},"finish_reason":"tool_calls"}]}`,
+		`data: [DONE]`,
+		``,
+	}, "\n")
+	mr, err := CollectOpenAIStream(strings.NewReader(src))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if mr.StopReason != "tool_use" {
+		t.Fatalf("stop_reason = %s", mr.StopReason)
+	}
+	if mr.Usage.InputTokens != 7 || mr.Usage.OutputTokens != 9 {
+		t.Fatalf("usage = %+v", mr.Usage)
+	}
+	var text, tool string
+	for _, b := range mr.Content {
+		if b.Type == "text" {
+			text = b.Text
+		}
+		if b.Type == "tool_use" {
+			tool = b.Name + ":" + string(b.Input)
+		}
+	}
+	if text != "hello" {
+		t.Fatalf("text = %q", text)
+	}
+	if tool != "f:{}" {
+		t.Fatalf("tool = %q", tool)
+	}
+}
+
+func TestCollectAnthropicStream(t *testing.T) {
+	src := strings.Join([]string{
+		`event: message_start`,
+		`data: {"type":"message_start","message":{"id":"msg_1","model":"m1","usage":{"input_tokens":11}}}`,
+		``,
+		`event: content_block_start`,
+		`data: {"type":"content_block_start","index":0,"content_block":{"type":"text"}}`,
+		``,
+		`event: content_block_delta`,
+		`data: {"type":"content_block_delta","index":0,"delta":{"type":"text_delta","text":"abc"}}`,
+		``,
+		`event: message_delta`,
+		`data: {"type":"message_delta","delta":{"stop_reason":"end_turn"},"usage":{"output_tokens":3}}`,
+		``,
+		`event: message_stop`,
+		`data: {"type":"message_stop"}`,
+		``,
+	}, "\n")
+	mr, err := CollectAnthropicStream(strings.NewReader(src))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(mr.Content) != 1 || mr.Content[0].Text != "abc" {
+		t.Fatalf("content = %+v", mr.Content)
+	}
+	if mr.Usage.InputTokens != 11 || mr.Usage.OutputTokens != 3 || mr.Model != "m1" {
+		t.Fatalf("meta = %+v model=%s", mr.Usage, mr.Model)
+	}
+}
+
 type testWriter struct{ buf strings.Builder }
 
 func (w *testWriter) Write(p []byte) (int, error) { return w.buf.Write(p) }

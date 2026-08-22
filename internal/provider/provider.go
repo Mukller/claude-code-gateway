@@ -24,6 +24,32 @@ func New(cfg config.Provider) *Provider {
 	if timeout <= 0 {
 		timeout = 10 * time.Minute
 	}
+	switch cfg.Type {
+	case "bedrock":
+		if cfg.Region == "" {
+			cfg.Region = "us-east-1"
+		}
+		if cfg.BaseURL == "" {
+			cfg.BaseURL = fmt.Sprintf("https://bedrock-runtime.%s.amazonaws.com", cfg.Region)
+		}
+		if cfg.AnthropicVersion == "" || cfg.AnthropicVersion == "2023-06-01" {
+			cfg.AnthropicVersion = "bedrock-2023-05-31"
+		}
+	case "vertex":
+		if cfg.BaseURL == "" {
+			cfg.BaseURL = "https://aiplatform.googleapis.com/v1"
+		}
+		if cfg.AuthStyle == "" {
+			cfg.AuthStyle = "api-key"
+		}
+		if cfg.AnthropicVersion == "" {
+			cfg.AnthropicVersion = "2023-06-01"
+		}
+	default:
+		if cfg.AnthropicVersion == "" {
+			cfg.AnthropicVersion = "2023-06-01"
+		}
+	}
 	return &Provider{
 		cfg:  cfg,
 		pool: NewPool(cfg.Keys),
@@ -31,10 +57,12 @@ func New(cfg config.Provider) *Provider {
 	}
 }
 
-func (p *Provider) Name() string           { return p.cfg.Name }
-func (p *Provider) Type() string           { return p.cfg.Type }
-func (p *Provider) Pool() *Pool            { return p.pool }
-func (p *Provider) StaticModels() []string { return p.cfg.Models }
+func (p *Provider) Name() string             { return p.cfg.Name }
+func (p *Provider) Type() string             { return p.cfg.Type }
+func (p *Provider) Pool() *Pool              { return p.pool }
+func (p *Provider) StaticModels() []string   { return p.cfg.Models }
+func (p *Provider) SendStreamOptions() bool  { return p.cfg.SendStreamOptions }
+func (p *Provider) AnthropicVersion() string { return p.cfg.AnthropicVersion }
 func (p *Provider) DiscoversModels() bool {
 	return p.cfg.DiscoverModels && p.Type() == "openai" && p.Pool().Len() > 0
 }
@@ -54,13 +82,13 @@ func (p *Provider) buildRequest(ctx context.Context, key, path string, body []by
 		return nil, err
 	}
 	req.Header.Set("Content-Type", "application/json")
-	if stream {
-		req.Header.Set("Accept", "text/event-stream")
-	}
 	switch p.cfg.Type {
 	case "anthropic":
 		req.Header.Set("x-api-key", key)
 		req.Header.Set("anthropic-version", p.cfg.AnthropicVersion)
+		if stream {
+			req.Header.Set("Accept", "text/event-stream")
+		}
 	case "anthropic-compat":
 		if p.cfg.AuthStyle == "bearer" {
 			req.Header.Set("Authorization", "Bearer "+key)
@@ -68,8 +96,32 @@ func (p *Provider) buildRequest(ctx context.Context, key, path string, body []by
 			req.Header.Set("x-api-key", key)
 		}
 		req.Header.Set("anthropic-version", p.cfg.AnthropicVersion)
+		if stream {
+			req.Header.Set("Accept", "text/event-stream")
+		}
+	case "bedrock":
+		creds, cerr := parseAWSKey(key)
+		if cerr != nil {
+			return nil, cerr
+		}
+		req.Header.Set("Accept", "application/json")
+		signAWSRequest(req, body, creds, p.cfg.Region, "bedrock", time.Now())
+	case "vertex":
+		if p.cfg.AuthStyle == "bearer" {
+			req.Header.Set("Authorization", "Bearer "+key)
+		} else {
+			q := req.URL.Query()
+			q.Set("key", key)
+			req.URL.RawQuery = q.Encode()
+		}
+		if stream {
+			req.Header.Set("Accept", "text/event-stream")
+		}
 	default:
 		req.Header.Set("Authorization", "Bearer "+key)
+		if stream {
+			req.Header.Set("Accept", "text/event-stream")
+		}
 	}
 	for k, v := range p.cfg.ExtraHeaders {
 		req.Header.Set(k, v)
@@ -115,10 +167,15 @@ func extractErrMsg(status int, data []byte, ptype string) string {
 			Message string `json:"message"`
 		} `json:"error"`
 	}
+	var aws struct {
+		Message string `json:"message"`
+	}
 	if json.Unmarshal(data, &ae) == nil && ae.Error.Message != "" {
 		msg = fmt.Sprintf("%s: %s", FirstNonEmpty(ae.Error.Type, "api_error"), ae.Error.Message)
 	} else if json.Unmarshal(data, &oe) == nil && oe.Error.Message != "" {
 		msg = oe.Error.Message
+	} else if json.Unmarshal(data, &aws) == nil && aws.Message != "" {
+		msg = aws.Message
 	} else {
 		s := strings.TrimSpace(string(data))
 		if s == "" {

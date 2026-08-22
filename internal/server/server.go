@@ -45,10 +45,12 @@ func New(cfg *config.Config, reg *provider.Registry, store *logstore.Store, pric
 
 func (s *Server) Handler() http.Handler {
 	mux := http.NewServeMux()
+	mux.HandleFunc("/", s.handleIndex)
 	mux.HandleFunc("/v1/messages", s.handleMessages)
 	mux.HandleFunc("/v1/messages/count_tokens", s.handleCountTokens)
 	mux.HandleFunc("/v1/models", s.handleModels)
 	mux.HandleFunc("/healthz", s.handleHealth)
+	mux.HandleFunc("/admin/dashboard", s.handleDashboard)
 	mux.HandleFunc("/admin/stats", s.requireAuth(s.handleAdminStats))
 	mux.HandleFunc("/admin/logs", s.requireAuth(s.handleAdminLogs))
 	return s.withRecovery(s.withAccessLog(mux))

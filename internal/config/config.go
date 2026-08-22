@@ -34,17 +34,19 @@ type Auth struct {
 }
 
 type Provider struct {
-	Name             string            `yaml:"name"`
-	Type             string            `yaml:"type"`
-	BaseURL          string            `yaml:"base_url"`
-	Keys             []string          `yaml:"keys"`
-	AuthStyle        string            `yaml:"auth_style"`
-	AnthropicVersion string            `yaml:"anthropic_version"`
-	ExtraHeaders     map[string]string `yaml:"extra_headers"`
-	Timeout          time.Duration     `yaml:"timeout"`
-	DiscoverModels   bool              `yaml:"discover_models"`
-	RefreshInterval  time.Duration     `yaml:"refresh_interval"`
-	Models           []string          `yaml:"models"`
+	Name              string            `yaml:"name"`
+	Type              string            `yaml:"type"`
+	BaseURL           string            `yaml:"base_url"`
+	Keys              []string          `yaml:"keys"`
+	AuthStyle         string            `yaml:"auth_style"`
+	AnthropicVersion  string            `yaml:"anthropic_version"`
+	ExtraHeaders      map[string]string `yaml:"extra_headers"`
+	Timeout           time.Duration     `yaml:"timeout"`
+	DiscoverModels    bool              `yaml:"discover_models"`
+	RefreshInterval   time.Duration     `yaml:"refresh_interval"`
+	Models            []string          `yaml:"models"`
+	SendStreamOptions bool              `yaml:"send_stream_options"`
+	Region            string            `yaml:"region"`
 }
 
 type Routing struct {
@@ -170,7 +172,7 @@ func (c *Config) validate() error {
 		}
 		names[p.Name] = true
 		switch p.Type {
-		case "anthropic", "anthropic-compat", "openai":
+		case "anthropic", "anthropic-compat", "openai", "bedrock", "vertex":
 		default:
 			return fmt.Errorf("provider %q: unknown type %q", p.Name, p.Type)
 		}

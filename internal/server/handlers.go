@@ -40,20 +40,64 @@ func classifyStatus(status int, soft, hard []int) FailKind {
 	return failFatal
 }
 
-func buildPayload(ptype, targetModel string, body []byte, mreq *core.MessagesRequest) ([]byte, string, error) {
-	switch ptype {
+func patchModelBody(body []byte, targetModel string) (map[string]json.RawMessage, error) {
+	var raw map[string]json.RawMessage
+	if err := json.Unmarshal(body, &raw); err != nil {
+		return nil, err
+	}
+	raw["model"], _ = json.Marshal(targetModel)
+	return raw, nil
+}
+
+func buildPayload(p *provider.Provider, targetModel string, body []byte, mreq *core.MessagesRequest) ([]byte, string, error) {
+	switch p.Type() {
 	case "anthropic", "anthropic-compat":
-		var raw map[string]json.RawMessage
-		if err := json.Unmarshal(body, &raw); err != nil {
+		raw, err := patchModelBody(body, targetModel)
+		if err != nil {
 			return nil, "", err
 		}
-		raw["model"], _ = json.Marshal(targetModel)
 		out, err := json.Marshal(raw)
 		return out, "/v1/messages", err
+	case "bedrock":
+		raw, err := patchModelBody(body, targetModel)
+		if err != nil {
+			return nil, "", err
+		}
+		delete(raw, "model")
+		delete(raw, "stream")
+		delete(raw, "metadata")
+		if _, ok := raw["anthropic_version"]; !ok {
+			raw["anthropic_version"], _ = json.Marshal(p.AnthropicVersion())
+		}
+		out, err := json.Marshal(raw)
+		action := "invoke"
+		if mreq.Stream {
+			action = "invoke-with-response-stream"
+		}
+		return out, "/model/" + provider.AWSEscape(targetModel) + "/" + action, err
+	case "vertex":
+		raw, err := patchModelBody(body, targetModel)
+		if err != nil {
+			return nil, "", err
+		}
+		delete(raw, "model")
+		delete(raw, "metadata")
+		if _, ok := raw["anthropic_version"]; !ok {
+			raw["anthropic_version"], _ = json.Marshal(p.AnthropicVersion())
+		}
+		out, err := json.Marshal(raw)
+		verb := "rawPredict"
+		if mreq.Stream {
+			verb = "streamRawPredict"
+		}
+		return out, "/publishers/anthropic/models/" + targetModel + ":" + verb, err
 	default:
 		cr, err := core.TranslateRequest(mreq, targetModel)
 		if err != nil {
 			return nil, "", err
+		}
+		if mreq.Stream && p.SendStreamOptions() {
+			cr.StreamOptions = &core.StreamOptions{IncludeUsage: true}
 		}
 		out, err := json.Marshal(cr)
 		return out, "/v1/chat/completions", err
@@ -134,7 +178,7 @@ func (s *Server) handleMessages(w http.ResponseWriter, r *http.Request) {
 		if p == nil || p.Pool().Len() == 0 {
 			continue
 		}
-		payload, upath, perr := buildPayload(p.Type(), tg.Model, body, &mreq)
+		payload, upath, perr := buildPayload(p, tg.Model, body, &mreq)
 		if perr != nil {
 			writeAnthropicError(w, http.StatusInternalServerError, "api_error", "build upstream request: "+perr.Error())
 			return
@@ -194,6 +238,10 @@ func (s *Server) handleMessages(w http.ResponseWriter, r *http.Request) {
 
 			p.Pool().Report(key, provider.Success)
 			rec.Status = resp.Status
+
+			if p.Type() == "bedrock" && stream {
+				resp.Body = provider.BedrockBody(resp.Body)
+			}
 
 			var u core.Usage
 			var serr error

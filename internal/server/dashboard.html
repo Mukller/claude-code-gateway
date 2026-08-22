@@ -1,0 +1,142 @@
+<!doctype html>
+<html lang="ru">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>cc-gateway</title>
+<style>
+:root{--bg:#0d1117;--card:#161b22;--border:#21262d;--text:#e6edf3;--dim:#8b949e;--acc:#58a6ff;--ok:#3fb950;--warn:#d29922;--err:#f85149}
+*{box-sizing:border-box;margin:0;padding:0}
+body{background:var(--bg);color:var(--text);font:14px/1.45 -apple-system,Segoe UI,Roboto,sans-serif;padding:24px}
+a{color:var(--acc);text-decoration:none}
+h1{font-size:20px;margin-bottom:4px}
+.sub{color:var(--dim);margin-bottom:20px;font-size:12px}
+.grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(150px,1fr));gap:12px;margin-bottom:20px}
+.card{background:var(--card);border:1px solid var(--border);border-radius:10px;padding:14px 16px}
+.card .lbl{color:var(--dim);font-size:11px;text-transform:uppercase;letter-spacing:.5px;margin-bottom:6px}
+.card .val{font-size:24px;font-weight:600}
+.card .val.ok{color:var(--ok)}.card .val.err{color:var(--err)}
+.chips{display:flex;flex-wrap:wrap;gap:8px;margin-bottom:20px}
+.chip{background:var(--card);border:1px solid var(--border);border-radius:999px;padding:4px 12px;font-size:12px;color:var(--dim)}
+.chip b{color:var(--text)}
+.chip .keys{color:var(--acc)}
+table{width:100%;border-collapse:collapse;background:var(--card);border:1px solid var(--border);border-radius:10px;overflow:hidden;margin-bottom:20px}
+th,td{text-align:left;padding:8px 12px;border-bottom:1px solid var(--border);font-size:13px}
+th{color:var(--dim);font-weight:500;font-size:11px;text-transform:uppercase;letter-spacing:.5px;background:#11161d}
+tr:last-child td{border-bottom:none}
+td.num,th.num{text-align:right;font-variant-numeric:tabular-nums}
+.st{display:inline-block;width:8px;height:8px;border-radius:50%;margin-right:6px}
+.st.s2{background:var(--ok)}.st.s4{background:var(--warn)}.st.s5,.st.sx{background:var(--err)}
+.errmsg{color:var(--err);max-width:340px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;display:inline-block;vertical-align:bottom}
+h2{font-size:14px;margin-bottom:10px;color:var(--dim);font-weight:600;text-transform:uppercase;letter-spacing:.5px}
+#tokpanel{position:fixed;top:18px;right:24px;display:flex;gap:8px;align-items:center}
+#tokpanel input{background:var(--card);border:1px solid var(--border);color:var(--text);border-radius:8px;padding:7px 10px;width:230px;font-size:12px}
+#tokpanel button{background:var(--acc);color:#04121f;border:none;border-radius:8px;padding:7px 14px;font-weight:600;cursor:pointer}
+.hidden{display:none!important}
+.empty{color:var(--dim);padding:14px;text-align:center}
+</style>
+</head>
+<body>
+<div id="tokpanel">
+  <input id="tok" type="password" placeholder="admin / api token" autocomplete="off">
+  <button onclick="saveTok()">OK</button>
+</div>
+<h1>claude-code-gateway</h1>
+<div class="sub">uptime <span id="uptime">–</span> · моделей: <span id="nmodels">–</span> · автообновление 5с</div>
+
+<div id="gate" class="hidden"><div class="card"><div class="lbl">доступ</div><div class="val err" style="font-size:14px">Введи токен сверху (GATEWAY_TOKEN или GATEWAY_ADMIN_TOKEN)</div></div></div>
+
+<div id="content">
+<div class="chips" id="providers"></div>
+<div class="grid">
+  <div class="card"><div class="lbl">Запросов сегодня</div><div class="val" id="t-req">–</div></div>
+  <div class="card"><div class="lbl">Ошибок сегодня</div><div class="val" id="t-err">–</div></div>
+  <div class="card"><div class="lbl">Токены сегодня (in/out)</div><div class="val" id="t-tok">–</div></div>
+  <div class="card"><div class="lbl">Стоимость сегодня</div><div class="val ok" id="t-cost">–</div></div>
+</div>
+
+<h2>Всего за всё время</h2>
+<table><tbody id="total"></tbody></table>
+
+<h2>По провайдерам</h2>
+<table><thead><tr><th>Провайдер</th><th class="num">Запросы</th><th class="num">Ошибки</th><th class="num">In</th><th class="num">Out</th><th class="num">Cost</th></tr></thead><tbody id="byprov"></tbody></table>
+
+<h2>По моделям (топ-15 по стоимости)</h2>
+<table><thead><tr><th>Модель</th><th class="num">Запросы</th><th class="num">In</th><th class="num">Out</th><th class="num">Cost</th></tr></thead><tbody id="bymodel"></tbody></table>
+
+<h2>Последние запросы</h2>
+<table><thead><tr><th>Время</th><th>Модель</th><th>Провайдер</th><th class="num">ms</th><th class="num">In/Out</th><th class="num">Cost</th><th>Статус</th></tr></thead><tbody id="recent"></tbody></table>
+</div>
+
+<script>
+const $ = id => document.getElementById(id);
+let tok = localStorage.getItem('ccg-token') || '';
+$('tok').value = tok;
+
+function saveTok(){ tok = $('tok').value.trim(); localStorage.setItem('ccg-token', tok); load(); }
+
+function fmt(n){ return n==null?'–':Number(n).toLocaleString('ru-RU'); }
+function fmtCost(c){ return '$'+(c||0).toFixed(4); }
+function esc(s){ return String(s??'').replace(/[&<>"]/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c])); }
+
+async function jget(url){
+  const r = await fetch(url, {headers:{'x-api-key': tok}});
+  if (r.status === 401 || r.status === 403) throw new Error('unauthorized');
+  if (!r.ok) throw new Error(r.status);
+  return r.json();
+}
+
+function statRow(s){ return `<tr>
+  <td>${fmt(s.requests)}</td><td class="num">${fmt(s.errors)}</td>
+  <td class="num">${fmt(s.input_tokens)}</td><td class="num">${fmt(s.output_tokens)}</td>
+  <td class="num">${fmtCost(s.cost_usd)}</td></tr>`; }
+
+async function load(){
+  try {
+    const [health, stats] = await Promise.all([jget('/healthz'), jget('/admin/stats')]);
+    $('gate').classList.add('hidden');
+    $('content').classList.remove('hidden');
+
+    $('uptime').textContent = Math.floor(health.uptime_s/3600)+'ч '+Math.floor(health.uptime_s%3600/60)+'м';
+    $('nmodels').textContent = health.models;
+    $('providers').innerHTML = health.providers.map(p =>
+      `<div class="chip"><b>${esc(p.name)}</b> · ${p.type} · ключей: <span class="keys">${p.keys}</span></div>`).join('');
+
+    $('t-req').textContent = fmt(stats.today.requests);
+    $('t-req').className = 'val' + (stats.today.errors? '':'');
+    $('t-err').textContent = fmt(stats.today.errors);
+    $('t-err').className = 'val ' + (stats.today.errors ? 'err':'ok');
+    $('t-tok').textContent = fmt(stats.today.input_tokens)+' / '+fmt(stats.today.output_tokens);
+    $('t-cost').textContent = fmtCost(stats.today.cost_usd);
+
+    $('total').innerHTML = '<tr>'+statRow(stats.total).replace(/^<tr>|<\/tr>$/g,'')+'</tr>';
+
+    const provs = Object.entries(stats.by_provider||{}).sort((a,b)=>b[1].cost_usd-a[1].cost_usd);
+    $('byprov').innerHTML = provs.length ? provs.map(([k,v])=>`<tr><td>${esc(k)}</td><td class="num">${fmt(v.requests)}</td><td class="num ${v.errors?'':''}">${fmt(v.errors)}</td><td class="num">${fmt(v.input_tokens)}</td><td class="num">${fmt(v.output_tokens)}</td><td class="num">${fmtCost(v.cost_usd)}</td></tr>`).join('')
+      : '<tr><td colspan="6" class="empty">нет данных</td></tr>';
+
+    const models = Object.entries(stats.by_model||{}).sort((a,b)=>b[1].cost_usd-a[1].cost_usd).slice(0,15);
+    $('bymodel').innerHTML = models.length ? models.map(([k,v])=>`<tr><td>${esc(k)}</td><td class="num">${fmt(v.requests)}</td><td class="num">${fmt(v.input_tokens)}</td><td class="num">${fmt(v.output_tokens)}</td><td class="num">${fmtCost(v.cost_usd)}</td></tr>`).join('')
+      : '<tr><td colspan="5" class="empty">нет данных</td></tr>';
+
+    const rec = [...(stats.recent||[])].reverse().slice(0,30);
+    $('recent').innerHTML = rec.length ? rec.map(r=>{
+      const cls = r.status>=500||r.status===0 ? 'sx' : r.status>=400 ? 's4' : 's2';
+      return `<tr><td>${new Date(r.time).toLocaleTimeString('ru-RU')}</td>
+        <td title="${esc(r.target_model)}">${esc(r.model)}</td>
+        <td>${esc(r.provider||'—')}</td>
+        <td class="num">${fmt(r.latency_ms)}</td>
+        <td class="num">${fmt(r.input_tokens)}/${fmt(r.output_tokens)}</td>
+        <td class="num">${fmtCost(r.cost_usd)}</td>
+        <td><span class="st ${cls}"></span>${r.status||'ERR'}${r.error?` <span class="errmsg" title="${esc(r.error)}">${esc(r.error)}</span>`:''}</td></tr>`;
+    }).join('') : '<tr><td colspan="7" class="empty">пока пусто — отправь запрос через Claude Code</td></tr>';
+  } catch(e) {
+    if (e.message === 'unauthorized'){ $('gate').classList.remove('hidden'); $('content').classList.add('hidden'); }
+  }
+}
+
+load();
+setInterval(load, 5000);
+</script>
+</body>
+</html>

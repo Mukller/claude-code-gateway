@@ -25,7 +25,7 @@ providers:
     timeout: 300s
     discover_models: true
     refresh_interval: 15m
-    models: []
+    send_stream_options: false    # true = просить у upstream точный usage в стриме
 
   # Прямой Anthropic — раскомментируй и задай ANTHROPIC_API_KEY
   # - name: anthropic
@@ -42,6 +42,24 @@ providers:
   #   auth_style: bearer          # или x-api-key
   #   keys:
   #     - "${NINE_ROUTER_KEY}"
+  #   timeout: 300s
+
+  # AWS Bedrock (Anthropic-модели через InvokeModel)
+  # - name: bedrock
+  #   type: bedrock
+  #   region: us-east-1
+  #   keys:
+  #     - "${AWS_ACCESS_KEY_ID}:${AWS_SECRET_ACCESS_KEY}"   # опц. третий сегмент: session token
+  #   timeout: 300s
+  #   models:
+  #     - "us.anthropic.claude-sonnet-4-20250514-v1:0"
+
+  # Google Vertex AI (Express API-key или bearer-токен сервис-аккаунта)
+  # - name: vertex
+  #   type: vertex
+  #   auth_style: api-key         # api-key (?key=) или bearer (Authorization header)
+  #   keys:
+  #     - "${VERTEX_API_KEY}"
   #   timeout: 300s
 
 routing:
