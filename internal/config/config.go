@@ -18,6 +18,13 @@ type Config struct {
 	Pricing   []PriceRule `yaml:"pricing"`
 	Logging   Logging     `yaml:"logging"`
 	RateLimit int         `yaml:"rate_limit_rpm"`
+	Cache     Cache       `yaml:"cache"`
+}
+
+type Cache struct {
+	Enabled    bool          `yaml:"enabled"`
+	TTL        time.Duration `yaml:"ttl"`
+	MaxEntries int           `yaml:"max_entries"`
 }
 
 type Server struct {
@@ -34,19 +41,20 @@ type Auth struct {
 }
 
 type Provider struct {
-	Name              string            `yaml:"name"`
-	Type              string            `yaml:"type"`
-	BaseURL           string            `yaml:"base_url"`
-	Keys              []string          `yaml:"keys"`
-	AuthStyle         string            `yaml:"auth_style"`
-	AnthropicVersion  string            `yaml:"anthropic_version"`
-	ExtraHeaders      map[string]string `yaml:"extra_headers"`
-	Timeout           time.Duration     `yaml:"timeout"`
-	DiscoverModels    bool              `yaml:"discover_models"`
-	RefreshInterval   time.Duration     `yaml:"refresh_interval"`
-	Models            []string          `yaml:"models"`
-	SendStreamOptions bool              `yaml:"send_stream_options"`
-	Region            string            `yaml:"region"`
+	Name               string            `yaml:"name"`
+	Type               string            `yaml:"type"`
+	BaseURL            string            `yaml:"base_url"`
+	Keys               []string          `yaml:"keys"`
+	AuthStyle          string            `yaml:"auth_style"`
+	AnthropicVersion   string            `yaml:"anthropic_version"`
+	ExtraHeaders       map[string]string `yaml:"extra_headers"`
+	Timeout            time.Duration     `yaml:"timeout"`
+	DiscoverModels     bool              `yaml:"discover_models"`
+	RefreshInterval    time.Duration     `yaml:"refresh_interval"`
+	Models             []string          `yaml:"models"`
+	SendStreamOptions  bool              `yaml:"send_stream_options"`
+	Region             string            `yaml:"region"`
+	ServiceAccountJSON string            `yaml:"service_account_json"`
 }
 
 type Routing struct {
@@ -82,6 +90,21 @@ type Logging struct {
 }
 
 func Load(path string) (*Config, error) {
+	c, err := parseFile(path)
+	if err != nil {
+		return nil, err
+	}
+	if err := c.validate(); err != nil {
+		return nil, err
+	}
+	return c, nil
+}
+
+func LoadLenient(path string) (*Config, error) {
+	return parseFile(path)
+}
+
+func parseFile(path string) (*Config, error) {
 	raw, err := os.ReadFile(path)
 	if err != nil {
 		return nil, fmt.Errorf("read %s: %w", path, err)
@@ -92,9 +115,6 @@ func Load(path string) (*Config, error) {
 		return nil, fmt.Errorf("parse yaml: %w", err)
 	}
 	c.applyDefaults()
-	if err := c.validate(); err != nil {
-		return nil, err
-	}
 	return &c, nil
 }
 
@@ -139,6 +159,12 @@ func (c *Config) applyDefaults() {
 	}
 	if c.Logging.RingSize <= 0 {
 		c.Logging.RingSize = 500
+	}
+	if c.Cache.TTL <= 0 {
+		c.Cache.TTL = 10 * time.Minute
+	}
+	if c.Cache.MaxEntries <= 0 {
+		c.Cache.MaxEntries = 128
 	}
 	if len(c.Providers) > 0 && len(c.Routing.DefaultChain) == 0 {
 		c.Routing.DefaultChain = []string{c.Providers[0].Name}
@@ -185,7 +211,7 @@ func (c *Config) validate() error {
 				n++
 			}
 		}
-		if n > 0 {
+		if n > 0 || (p.Type == "vertex" && p.AuthStyle == "sa") {
 			hasValid = true
 		}
 	}

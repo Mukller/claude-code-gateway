@@ -17,6 +17,7 @@ type Record struct {
 	Status      int       `json:"status"`
 	LatencyMs   int64     `json:"latency_ms"`
 	Stream      bool      `json:"stream"`
+	Cached      bool      `json:"cached,omitempty"`
 	InTok       int64     `json:"input_tokens"`
 	OutTok      int64     `json:"output_tokens"`
 	CacheRead   int64     `json:"cache_read_tokens,omitempty"`
@@ -49,6 +50,7 @@ type Store struct {
 	ringMax int
 	ring    []Record
 	days    map[string]*Stat
+	hours   map[string]*Stat
 	models  map[string]*Stat
 	provs   map[string]*Stat
 	total   Stat
@@ -60,6 +62,7 @@ type View struct {
 	Today         Stat            `json:"today"`
 	Total         Stat            `json:"total"`
 	ByDay         map[string]Stat `json:"by_day"`
+	ByHour        map[string]Stat `json:"by_hour"`
 	ByModel       map[string]Stat `json:"by_model"`
 	ByProvider    map[string]Stat `json:"by_provider"`
 	Recent        []Record        `json:"recent"`
@@ -83,6 +86,7 @@ func New(path string, ringSize int) (*Store, error) {
 		ringMax: ringSize,
 		ring:    make([]Record, 0, ringSize),
 		days:    map[string]*Stat{},
+		hours:   map[string]*Stat{},
 		models:  map[string]*Stat{},
 		provs:   map[string]*Stat{},
 		started: time.Now(),
@@ -109,6 +113,7 @@ func (s *Store) Add(r Record) {
 		return st
 	}
 	get(s.days, day).add(r)
+	get(s.hours, r.Time.UTC().Format("2006-01-02T15")).add(r)
 	if r.Model != "" {
 		get(s.models, r.Model).add(r)
 	}
@@ -138,6 +143,7 @@ func (s *Store) Snapshot() View {
 	v := View{
 		UptimeSeconds: time.Since(s.started).Seconds(),
 		ByDay:         copyStat(s.days),
+		ByHour:        copyStat(s.hours),
 		ByModel:       copyStat(s.models),
 		ByProvider:    copyStat(s.provs),
 		Total:         s.total,

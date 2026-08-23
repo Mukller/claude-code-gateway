@@ -11,6 +11,12 @@ auth:
 
 rate_limit_rpm: 0
 
+# Кэш одинаковых non-stream ответов (для реплеев/оценок). Выкл по умолчанию!
+cache:
+  enabled: false
+  ttl: 10m
+  max_entries: 128
+
 logging:
   file: "data/usage.jsonl"
   ring_size: 500
@@ -54,13 +60,19 @@ providers:
   #   models:
   #     - "us.anthropic.claude-sonnet-4-20250514-v1:0"
 
-  # Google Vertex AI (Express API-key или bearer-токен сервис-аккаунта)
+  # Google Vertex AI (Express API-key, bearer-токен или сервис-аккаунт)
   # - name: vertex
   #   type: vertex
-  #   auth_style: api-key         # api-key (?key=) или bearer (Authorization header)
+  #   auth_style: api-key         # api-key (?key=) | bearer | sa (сервис-аккаунт)
   #   keys:
   #     - "${VERTEX_API_KEY}"
   #   timeout: 300s
+  #
+  # Вариант с сервис-аккаунтом GCP (JWT -> OAuth, токен рефрешится сам):
+  # - name: vertex-sa
+  #   type: vertex
+  #   auth_style: sa
+  #   service_account_json: "${GCP_SA_JSON}"   # JSON ключа целиком ИЛИ путь к файлу
 
 routing:
   alias_claude_prefix: true

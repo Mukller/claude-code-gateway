@@ -8,6 +8,7 @@ import (
 	"strings"
 	"time"
 
+	"claude-code-gateway/internal/cache"
 	"claude-code-gateway/internal/core"
 	"claude-code-gateway/internal/logstore"
 	"claude-code-gateway/internal/pricing"
@@ -15,6 +16,7 @@ import (
 )
 
 const maxBodyBytes = 64 << 20
+const maxResponseBytes = 128 << 20
 
 type FailKind int
 
@@ -136,10 +138,10 @@ func startSSEHeaders(w http.ResponseWriter) {
 	w.WriteHeader(http.StatusOK)
 }
 
-func writeJSONMessage(w http.ResponseWriter, mr *core.MessageResponse) {
+func writeJSONMessage(w http.ResponseWriter, body []byte) {
 	w.Header().Set("Content-Type", "application/json")
 	w.WriteHeader(http.StatusOK)
-	json.NewEncoder(w).Encode(mr)
+	w.Write(body)
 }
 
 func (s *Server) handleMessages(w http.ResponseWriter, r *http.Request) {
@@ -182,6 +184,21 @@ func (s *Server) handleMessages(w http.ResponseWriter, r *http.Request) {
 		if perr != nil {
 			writeAnthropicError(w, http.StatusInternalServerError, "api_error", "build upstream request: "+perr.Error())
 			return
+		}
+
+		var ck string
+		if !stream && s.cache != nil {
+			ck = cache.Key(p.Name(), tg.Model, payload)
+			if e, found := s.cache.Get(ck); found {
+				writeJSONMessage(w, e.Body)
+				s.store.Add(logstore.Record{
+					Time: time.Now(), Token: maskToken(token), Model: mreq.Model,
+					TargetModel: tg.Model, Provider: p.Name(), Status: http.StatusOK,
+					Cached: true, InTok: e.In, OutTok: e.Out,
+					CostUSD: s.costFor(tg.Model, e.In, e.Out, 0, 0),
+				})
+				return
+			}
 		}
 
 		triedKeys := map[string]bool{}
@@ -245,9 +262,10 @@ func (s *Server) handleMessages(w http.ResponseWriter, r *http.Request) {
 
 			var u core.Usage
 			var serr error
-			flush := newFlusher(w)
+			var respBytes []byte
 
 			if stream {
+				flush := newFlusher(w)
 				startSSEHeaders(w)
 				flush()
 				ct := resp.Header.Get("Content-Type")
@@ -278,12 +296,13 @@ func (s *Server) handleMessages(w http.ResponseWriter, r *http.Request) {
 				resp.Body.Close()
 			} else {
 				ct := resp.Header.Get("Content-Type")
+				var respBytes []byte
 				switch {
 				case p.Type() == "openai" && isSSEContentType(ct):
 					var mr *core.MessageResponse
 					mr, serr = core.CollectOpenAIStream(resp.Body)
 					if serr == nil {
-						writeJSONMessage(w, mr)
+						respBytes, _ = json.Marshal(mr)
 						u = mr.Usage
 					}
 				case p.Type() == "openai":
@@ -295,7 +314,7 @@ func (s *Server) handleMessages(w http.ResponseWriter, r *http.Request) {
 							serr = jerr
 						} else {
 							mr := core.TranslateResponse(&cr, tg.Model)
-							writeJSONMessage(w, mr)
+							respBytes, _ = json.Marshal(mr)
 							u.InputTokens = mr.Usage.InputTokens
 							u.OutputTokens = mr.Usage.OutputTokens
 						}
@@ -304,20 +323,20 @@ func (s *Server) handleMessages(w http.ResponseWriter, r *http.Request) {
 					var mr *core.MessageResponse
 					mr, serr = core.CollectAnthropicStream(resp.Body)
 					if serr == nil {
-						writeJSONMessage(w, mr)
+						respBytes, _ = json.Marshal(mr)
 						u = mr.Usage
 					}
 				default:
-					var data []byte
-					data, serr = readAllLimited(resp.Body)
-					if serr == nil {
-						w.Header().Set("Content-Type", "application/json")
-						w.WriteHeader(resp.Status)
-						w.Write(data)
-						u = core.ExtractAnthropicUsage(data)
-					}
+					respBytes, serr = readAllLimited(resp.Body)
+					u = core.ExtractAnthropicUsage(respBytes)
 				}
 				resp.Body.Close()
+
+				if serr == nil {
+					w.Header().Set("Content-Type", "application/json")
+					w.WriteHeader(http.StatusOK)
+					w.Write(respBytes)
+				}
 			}
 
 			rec.LatencyMs = time.Since(started).Milliseconds()
@@ -337,6 +356,10 @@ func (s *Server) handleMessages(w http.ResponseWriter, r *http.Request) {
 			}
 			rec.CostUSD = s.costFor(tg.Model, rec.InTok, rec.OutTok, rec.CacheRead, rec.CacheWrite)
 			s.store.Add(rec)
+
+			if ck != "" && len(respBytes) > 0 {
+				s.cache.Put(ck, cache.Entry{Body: respBytes, In: rec.InTok, Out: rec.OutTok})
+			}
 			return
 		}
 	}
@@ -357,8 +380,6 @@ func (s *Server) handleMessages(w http.ResponseWriter, r *http.Request) {
 		Status: status, Error: core.TrimString(msg, 400),
 	})
 }
-
-const maxResponseBytes = 128 << 20
 
 func readAllLimited(body io.Reader) ([]byte, error) {
 	return io.ReadAll(io.LimitReader(body, maxResponseBytes))
@@ -460,11 +481,19 @@ func (s *Server) handleHealth(w http.ResponseWriter, r *http.Request) {
 		"uptime_s":  int64(time.Since(s.started).Seconds()),
 		"providers": provs,
 		"models":    len(s.reg.Catalog()),
+		"cache":     s.cacheSize(),
 	})
 }
 
 func (s *Server) handleAdminStats(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusOK, s.store.Snapshot())
+}
+
+func (s *Server) cacheSize() int {
+	if s.cache == nil {
+		return 0
+	}
+	return s.cache.Len()
 }
 
 func (s *Server) handleAdminLogs(w http.ResponseWriter, r *http.Request) {

@@ -16,7 +16,9 @@
   - `bedrock` — AWS Bedrock (InvokeModel / invoke-with-response-stream): SigV4-подпись из stdlib,
     декодирование бинарного event-stream, ключ формата `AKID:SECRET[:SESSION_TOKEN]`
   - `vertex` — Google Vertex AI (`rawPredict`/`streamRawPredict`, нативный Anthropic-формат):
-    Express API-key (`?key=`) или bearer-токен сервис-аккаунта
+    Express API-key (`?key=`), bearer-токен, или **сервис-аккаунт** (`auth_style: sa` +
+    `service_account_json`: JSON ключа или путь к файлу — JWT подписывается на месте,
+    OAuth-токен кешируется и рефрешится автоматически)
 - **Веб-дашборд** `/admin/dashboard`: карточки за сегодня, разбивка по провайдерам/моделям,
   лента последних запросов с ошибками, автообновление
 - **Ротация ключей**: несколько ключей на провайдера, round-robin, cooldown при 401/403/429/5xx с экспоненциальным backoff
@@ -26,7 +28,10 @@
 - **claude/ алиасы**: дублирует модели под `claude/<id>`, чтобы они появлялись в родном пикере моделей Claude Code
   (`CLAUDE_CODE_ENABLE_GATEWAY_MODEL_DISCOVERY=1`)
 - **Логи и стоимость**: каждая запись — токены, latency, статус, оценка стоимости в USD; JSONL-файл + агрегаты
-- **Rate limit**, admin-API (`/admin/stats`, `/admin/logs`), healthcheck
+- **Кэш ответов (opt-in)**: одинаковые non-stream запросы отдаются из LRU+TTL кэша
+  (`cache.enabled: true`) — для реплеев и оценок; в логе такие записи помечены `"cached":true`
+- **Rate limit**, admin-API (`/admin/stats`, `/admin/logs`), healthcheck (`/healthz` +
+  флаг `-healthcheck` для docker/compose)
 - **Лаунчер**: `gateway -launch -- "твои флаги claude"` — поднимает гейтвей и стартует Claude Code
   с уже прописанными env
 
@@ -110,7 +115,9 @@ pricing:                           # USD за 1M токенов; pattern = glob
 ## Админка и наблюдение
 
 Дашборд: **http://localhost:8090/admin/dashboard** — введи `GATEWAY_TOKEN` или
-`GATEWAY_ADMIN_TOKEN` (сохраняется в localStorage, автообновление 5с).
+`GATEWAY_ADMIN_TOKEN` (сохраняется в localStorage, автообновление 5с). Внутри:
+карточки за сегодня, график запросов за 24ч (UTC), таблицы по провайдерам/моделям,
+лента последних запросов.
 
 ```bash
 curl http://localhost:8090/healthz
@@ -158,6 +165,6 @@ internal/config         YAML + ${ENV}
 
 ## Roadmap
 
-- Дашборд: графики по часам
-- OAuth-рефреш токенов сервис-аккаунта Vertex из коробки
-- Кэширование ответов
+- Графики стоимости по дням в дашборде
+- Кэширование стримовых ответов (идемпотентность спорна — пока не делаем)
+- Webhook'и на события usage

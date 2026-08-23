@@ -34,6 +34,10 @@ h2{font-size:14px;margin-bottom:10px;color:var(--dim);font-weight:600;text-trans
 #tokpanel button{background:var(--acc);color:#04121f;border:none;border-radius:8px;padding:7px 14px;font-weight:600;cursor:pointer}
 .hidden{display:none!important}
 .empty{color:var(--dim);padding:14px;text-align:center}
+.bars{display:flex;align-items:flex-end;gap:3px;height:104px;width:100%}
+.bar{flex:1;background:linear-gradient(180deg,var(--acc),#1f6feb);border-radius:3px 3px 0 0;min-height:2px;position:relative;cursor:default}
+.bar:hover{filter:brightness(1.3)}
+.barlbl{position:absolute;bottom:-16px;left:50%;transform:translateX(-50%);font-size:9px;color:var(--dim);white-space:nowrap}
 </style>
 </head>
 <body>
@@ -57,6 +61,11 @@ h2{font-size:14px;margin-bottom:10px;color:var(--dim);font-weight:600;text-trans
 
 <h2>Всего за всё время</h2>
 <table><tbody id="total"></tbody></table>
+
+<h2>За последние 24 часа (UTC)</h2>
+<table><tr><td style="padding:10px 12px 14px">
+<div class="bars" id="chart"></div>
+</td></tr></table>
 
 <h2>По провайдерам</h2>
 <table><thead><tr><th>Провайдер</th><th class="num">Запросы</th><th class="num">Ошибки</th><th class="num">In</th><th class="num">Out</th><th class="num">Cost</th></tr></thead><tbody id="byprov"></tbody></table>
@@ -110,6 +119,22 @@ async function load(){
     $('t-cost').textContent = fmtCost(stats.today.cost_usd);
 
     $('total').innerHTML = '<tr>'+statRow(stats.total).replace(/^<tr>|<\/tr>$/g,'')+'</tr>';
+
+    const byHour = stats.by_hour || {};
+    const bars = [];
+    const nowH = new Date();
+    for (let i = 23; i >= 0; i--) {
+      const d = new Date(Date.UTC(nowH.getUTCFullYear(), nowH.getUTCMonth(), nowH.getUTCDate(), nowH.getUTCHours() - i));
+      const key = d.toISOString().slice(0,13);
+      const s = byHour[key] || {requests:0, cost_usd:0};
+      bars.push({key, req: s.requests, cost: s.cost_usd});
+    }
+    const maxReq = Math.max(1, ...bars.map(b=>b.req));
+    $('chart').innerHTML = bars.map((b,i) => {
+      const h = Math.max(2, Math.round(b.req/maxReq*84));
+      const lbl = i%4===3 ? b.key.slice(11)+'ч' : '';
+      return `<div class="bar" style="height:${h}px" title="${b.key}: ${b.req} запр., ${fmtCost(b.cost)}">${lbl?`<span class="barlbl">${lbl}</span>`:''}</div>`;
+    }).join('');
 
     const provs = Object.entries(stats.by_provider||{}).sort((a,b)=>b[1].cost_usd-a[1].cost_usd);
     $('byprov').innerHTML = provs.length ? provs.map(([k,v])=>`<tr><td>${esc(k)}</td><td class="num">${fmt(v.requests)}</td><td class="num ${v.errors?'':''}">${fmt(v.errors)}</td><td class="num">${fmt(v.input_tokens)}</td><td class="num">${fmt(v.output_tokens)}</td><td class="num">${fmtCost(v.cost_usd)}</td></tr>`).join('')

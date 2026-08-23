@@ -8,6 +8,7 @@ import (
 	"strings"
 	"time"
 
+	"claude-code-gateway/internal/cache"
 	"claude-code-gateway/internal/config"
 	"claude-code-gateway/internal/logstore"
 	"claude-code-gateway/internal/pricing"
@@ -21,6 +22,7 @@ type Server struct {
 	store   *logstore.Store
 	prices  pricing.Table
 	limiter *ratelimit.Limiter
+	cache   *cache.Cache
 	started time.Time
 	tokens  map[string]bool
 }
@@ -34,6 +36,9 @@ func New(cfg *config.Config, reg *provider.Registry, store *logstore.Store, pric
 		limiter: ratelimit.New(cfg.RateLimit),
 		started: time.Now(),
 		tokens:  map[string]bool{},
+	}
+	if cfg.Cache.Enabled {
+		s.cache = cache.New(cfg.Cache.TTL, cfg.Cache.MaxEntries)
 	}
 	for _, t := range cfg.Auth.Tokens {
 		if t != "" {

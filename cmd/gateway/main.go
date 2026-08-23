@@ -24,15 +24,37 @@ func main() {
 	log.SetFlags(log.LstdFlags | log.Lmicroseconds)
 	cfgPath := flag.String("config", "config.yaml", "path to config file")
 	launch := flag.Bool("launch", false, "start gateway and spawn `claude` with env injected")
+	healthcheck := flag.Bool("healthcheck", false, "probe /healthz and exit with 0/1")
 	flag.Parse()
 	if envPath := os.Getenv("GATEWAY_CONFIG"); envPath != "" {
 		cfgPath = &envPath
 	}
 
-	cfg, err := config.Load(*cfgPath)
-	if err != nil {
+	var cfg *config.Config
+	var err error
+	if *healthcheck {
+		if cfg, err = config.LoadLenient(*cfgPath); err != nil {
+			cfg = &config.Config{}
+		}
+		url := baseURLFor(cfg.Server.Listen) + "/healthz"
+		client := &http.Client{Timeout: 5 * time.Second}
+		resp, herr := client.Get(url)
+		if herr != nil {
+			fmt.Fprintf(os.Stderr, "healthcheck %s: %v\n", url, herr)
+			os.Exit(1)
+		}
+		resp.Body.Close()
+		if resp.StatusCode != http.StatusOK {
+			fmt.Fprintf(os.Stderr, "healthcheck %s: status %d\n", url, resp.StatusCode)
+			os.Exit(1)
+		}
+		fmt.Println("ok")
+		return
+	}
+	if cfg, err = config.Load(*cfgPath); err != nil {
 		log.Fatalf("config: %v", err)
 	}
+
 	log.Printf("config loaded from %s", *cfgPath)
 
 	store, err := logstore.New(cfg.Logging.File, cfg.Logging.RingSize)

@@ -7,16 +7,21 @@ import (
 	"fmt"
 	"io"
 	"net/http"
+	"os"
 	"strings"
+	"sync"
 	"time"
 
 	"claude-code-gateway/internal/config"
 )
 
 type Provider struct {
-	cfg  config.Provider
-	pool *Pool
-	http *http.Client
+	cfg    config.Provider
+	pool   *Pool
+	http   *http.Client
+	saOnce sync.Once
+	saSrc  *SATokenSource
+	saErr  error
 }
 
 func New(cfg config.Provider) *Provider {
@@ -109,6 +114,16 @@ func (p *Provider) buildRequest(ctx context.Context, key, path string, body []by
 	case "vertex":
 		if p.cfg.AuthStyle == "bearer" {
 			req.Header.Set("Authorization", "Bearer "+key)
+		} else if p.cfg.AuthStyle == "sa" {
+			src, serr := p.ensureSA()
+			if serr != nil {
+				return nil, serr
+			}
+			tok, terr := src.Token(ctx)
+			if terr != nil {
+				return nil, terr
+			}
+			req.Header.Set("Authorization", "Bearer "+tok)
 		} else {
 			q := req.URL.Query()
 			q.Set("key", key)
@@ -127,6 +142,34 @@ func (p *Provider) buildRequest(ctx context.Context, key, path string, body []by
 		req.Header.Set(k, v)
 	}
 	return req, nil
+}
+
+func (p *Provider) ensureSA() (*SATokenSource, error) {
+	p.saOnce.Do(func() {
+		raw := strings.TrimSpace(p.cfg.ServiceAccountJSON)
+		if raw == "" {
+			p.saErr = fmt.Errorf("vertex auth_style=sa: service_account_json is empty")
+			return
+		}
+		var data []byte
+		if strings.HasPrefix(raw, "{") {
+			data = []byte(raw)
+		} else {
+			b, ferr := os.ReadFile(raw)
+			if ferr != nil {
+				p.saErr = fmt.Errorf("read service account file: %w", ferr)
+				return
+			}
+			data = b
+		}
+		src, gerr := NewSATokenSource(data)
+		if gerr != nil {
+			p.saErr = gerr
+			return
+		}
+		p.saSrc = src
+	})
+	return p.saSrc, p.saErr
 }
 
 type ExecResult struct {
