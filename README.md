@@ -1,4 +1,16 @@
+<div align="center">
+
+[English](README_EN.md) • **Русский**
+
+</div>
+
 # claude-code-gateway
+
+<p align="center">
+  <a href="https://github.com/Mukller">
+    <img src="https://img.shields.io/badge/Anton%20Petnitsky-Developer-0d1117?style=for-the-badge&logo=github&logoColor=white&labelColor=0d1117&color=58a6ff" alt="Anton Petnitsky" />
+  </a>
+</p>
 
 Лёгкий гейтвей на Go для **Claude Code**: единая точка входа в стиле Anthropic Messages API с
 мультипровайдером, ротацией ключей, фолбэком между провайдерами, логами и подсчётом стоимости.
