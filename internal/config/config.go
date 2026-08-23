@@ -18,6 +18,8 @@ type Config struct {
 	Pricing     []PriceRule `yaml:"pricing"`
 	Logging     Logging     `yaml:"logging"`
 	RateLimit   int         `yaml:"rate_limit_rpm"`
+	ConfigWatch bool        `yaml:"config_watch"`
+	Passthrough []string    `yaml:"passthrough_headers"`
 	Cache       Cache       `yaml:"cache"`
 	Webhooks    []Webhook   `yaml:"webhooks"`
 	Clients     []Client    `yaml:"clients"`
@@ -88,10 +90,12 @@ type RespGuardrails struct {
 }
 
 type Server struct {
-	Listen       string        `yaml:"listen"`
-	ReadTimeout  time.Duration `yaml:"read_timeout"`
-	WriteTimeout time.Duration `yaml:"write_timeout"`
-	UpstreamTO   time.Duration `yaml:"upstream_timeout"`
+	Listen           string        `yaml:"listen"`
+	ReadTimeout      time.Duration `yaml:"read_timeout"`
+	WriteTimeout     time.Duration `yaml:"write_timeout"`
+	UpstreamTO       time.Duration `yaml:"upstream_timeout"`
+	KeepAliveSeconds int           `yaml:"keepalive_seconds"`
+	CORSOrigins      []string      `yaml:"cors_origins"`
 }
 
 type Auth struct {
@@ -117,6 +121,7 @@ type Provider struct {
 	Region             string            `yaml:"region"`
 	ServiceAccountJSON string            `yaml:"service_account_json"`
 	Weight             int               `yaml:"weight"`
+	KeyStrategy        string            `yaml:"key_strategy"` // round_robin | fill_first
 	ProbeInterval      time.Duration     `yaml:"probe_interval"`
 }
 
@@ -125,6 +130,7 @@ type Routing struct {
 	AliasClaudePrefix bool      `yaml:"alias_claude_prefix"`
 	Rules             []Rule    `yaml:"rules"`
 	Scenarios         Scenarios `yaml:"scenarios"`
+	SessionAffinity   bool      `yaml:"session_affinity"`
 }
 
 type Scenarios struct {
@@ -172,8 +178,9 @@ type PriceRule struct {
 }
 
 type Logging struct {
-	File     string `yaml:"file"`
-	RingSize int    `yaml:"ring_size"`
+	File       string `yaml:"file"`
+	RingSize   int    `yaml:"ring_size"`
+	JSONFormat bool   `yaml:"json_format"`
 }
 
 func Load(path string) (*Config, error) {

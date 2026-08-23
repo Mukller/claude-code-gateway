@@ -22,8 +22,9 @@ type Cache struct {
 }
 
 type entryMeta struct {
-	e  Entry
-	at time.Time
+	e   Entry
+	at  time.Time
+	ttl time.Duration
 }
 
 func New(ttl time.Duration, maxEntries int) *Cache {
@@ -57,11 +58,36 @@ func (c *Cache) Get(k string) (Entry, bool) {
 	if !ok {
 		return Entry{}, false
 	}
-	if time.Since(meta.at) > c.ttl {
+	ttl := meta.ttl
+	if ttl <= 0 {
+		ttl = c.ttl
+	}
+	if time.Since(meta.at) > ttl {
 		delete(c.m, k)
 		return Entry{}, false
 	}
 	return meta.e, true
+}
+
+func (c *Cache) PutWithTTL(k string, e Entry, ttl time.Duration) {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	if _, exists := c.m[k]; !exists {
+		c.order = append(c.order, k)
+	}
+	c.m[k] = entryMeta{e: e, at: time.Now(), ttl: ttl}
+	for len(c.order) > c.max {
+		oldest := c.order[0]
+		c.order = c.order[1:]
+		delete(c.m, oldest)
+	}
+}
+
+func (c *Cache) Flush() {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	c.m = map[string]entryMeta{}
+	c.order = nil
 }
 
 func (c *Cache) Put(k string, e Entry) {

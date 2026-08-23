@@ -217,6 +217,7 @@ func (s *Server) handleMessages(w http.ResponseWriter, r *http.Request) {
 	}
 	stream := mreq.Stream
 
+	o := parseOverrides(r)
 	s.rails.redactPII(&mreq)
 	body, _ = json.Marshal(&mreq)
 	if blockedMsg := s.rails.checkRequest(&mreq, core.EstimateRequestTokens(&mreq)); blockedMsg != "" {
@@ -224,7 +225,22 @@ func (s *Server) handleMessages(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	logR := func(r logstore.Record) {
+		if o.metadata != nil {
+			r.Metadata = o.metadata
+		}
+		if o.collectLog {
+			s.logRecord(r)
+		}
+	}
+
 	est, hasImage, thinking := core.RequestTraits(&mreq)
+	sessionID := ""
+	var md map[string]string
+	if len(mreq.Metadata) > 0 {
+		json.Unmarshal(mreq.Metadata, &md)
+	}
+	sessionID = md["user_id"]
 	if !s.budgets.allowsModel(token, mreq.Model) {
 		writeAnthropicError(w, http.StatusForbidden, "permission_error",
 			fmt.Sprintf("model %q is not allowed for this client", mreq.Model))
@@ -240,12 +256,19 @@ func (s *Server) handleMessages(w http.ResponseWriter, r *http.Request) {
 		EstTokens: est,
 		HasImage:  hasImage,
 		Thinking:  thinking,
+		SessionID: sessionID,
 	})
 	attemptsLeft := s.cfg.Retry.MaxAttempts
+	if o.maxAttempts > 0 {
+		attemptsLeft = o.maxAttempts
+	}
 	lastProv, lastMsg := "", ""
 	lastStatus := 0
+	var triedProvs []string
+	tgIdx := -1
 
 	for _, tg := range targets {
+		tgIdx++
 		p := s.reg.Provider(tg.Name)
 		if p == nil || p.Pool().Len() == 0 {
 			continue
@@ -259,7 +282,13 @@ func (s *Server) handleMessages(w http.ResponseWriter, r *http.Request) {
 		var ck string
 		var semKey string
 		var semVec []float32
-		if !stream && s.cache != nil {
+		if !stream && s.cache != nil && !o.skipCache {
+			if o.customKey != "" {
+				ck = "custom:" + o.customKey
+			} else {
+				ck = cache.Key(p.Name(), tg.Model, payload)
+			}
+			w.Header().Set("X-Ccg-Cache-Status", "MISS")
 			if s.fuzzy != nil {
 				if v, err := s.embedder.Embed(core.RequestFlatText(&mreq)); err == nil {
 					if k, _, found := s.fuzzy.Search(v); found {
@@ -271,8 +300,9 @@ func (s *Server) handleMessages(w http.ResponseWriter, r *http.Request) {
 				}
 				if semKey != "" {
 					if e, found := s.cacheGet(semKey); found {
+						w.Header().Set("X-Ccg-Cache-Status", "HIT; source=semantic")
 						writeJSONMessage(w, e.Body)
-						s.logRecord(logstore.Record{
+						logR(logstore.Record{
 							Time: time.Now(), Token: s.tokenLabel(token), Model: mreq.Model,
 							RequestID: reqID, TargetModel: tg.Model, Provider: p.Name(),
 							Status: http.StatusOK, Cached: true, SemanticHit: true,
@@ -283,10 +313,10 @@ func (s *Server) handleMessages(w http.ResponseWriter, r *http.Request) {
 					}
 				}
 			}
-			ck = cache.Key(p.Name(), tg.Model, payload)
 			if e, found := s.cacheGet(ck); found {
+				w.Header().Set("X-Ccg-Cache-Status", "HIT; source=exact")
 				writeJSONMessage(w, e.Body)
-				s.logRecord(logstore.Record{
+				logR(logstore.Record{
 					Time: time.Now(), Token: s.tokenLabel(token), Model: mreq.Model,
 					RequestID: reqID, TargetModel: tg.Model, Provider: p.Name(),
 					Status: http.StatusOK, Cached: true, InTok: e.In, OutTok: e.Out,
@@ -308,6 +338,7 @@ func (s *Server) handleMessages(w http.ResponseWriter, r *http.Request) {
 			}
 			triedKeys[key] = true
 			p.BeginRequest()
+			triedProvs = append(triedProvs, p.Name())
 
 			rec := logstore.Record{
 				Time:        time.Now(),
@@ -326,7 +357,7 @@ func (s *Server) handleMessages(w http.ResponseWriter, r *http.Request) {
 				p.Pool().Report(key, provider.SoftFail)
 				p.NoteUpstream(false)
 				rec.Error = core.TrimString(uerr.Error(), 400)
-				s.logRecord(rec)
+				logR(rec)
 				lastProv, lastMsg, lastStatus = p.Name(), rec.Error, 0
 				continue
 			}
@@ -347,7 +378,7 @@ func (s *Server) handleMessages(w http.ResponseWriter, r *http.Request) {
 				}
 				rec.Status = resp.Status
 				rec.Error = core.TrimString(FirstNonEmptyStr(resp.ErrMsg, string(data)), 400)
-				s.logRecord(rec)
+				logR(rec)
 				lastProv, lastMsg, lastStatus = p.Name(), rec.Error, resp.Status
 				if !kind.retryable() {
 					passThroughUpstreamError(w, resp.Status, data)
@@ -362,6 +393,16 @@ func (s *Server) handleMessages(w http.ResponseWriter, r *http.Request) {
 
 			if p.Type() == "bedrock" && stream {
 				resp.Body = provider.BedrockBody(resp.Body)
+
+				for _, h := range s.cfg.Passthrough {
+					if v := resp.Header.Get(h); v != "" {
+						w.Header().Set(h, v)
+					}
+				}
+				if len(triedProvs) > 0 || tgIdx > 0 {
+					w.Header().Set("X-Ccg-Tried", strings.Join(triedProvs, ","))
+					w.Header().Set("X-Ccg-Fallback", fmt.Sprintf("%v", tgIdx > 0))
+				}
 			}
 
 			var u core.Usage
@@ -376,6 +417,8 @@ func (s *Server) handleMessages(w http.ResponseWriter, r *http.Request) {
 				if !bufferedScan {
 					startSSEHeaders(fbw)
 					flush()
+					stopKA := s.startKeepalive(w, flush, fbw, started)
+					defer close(stopKA)
 				}
 				switch {
 				case bufferedScan:
@@ -475,7 +518,7 @@ func (s *Server) handleMessages(w http.ResponseWriter, r *http.Request) {
 			}
 			if serr != nil {
 				rec.Error = core.TrimString(serr.Error(), 300)
-				s.logRecord(rec)
+				logR(rec)
 				lastProv, lastMsg, lastStatus = p.Name(), rec.Error, resp.Status
 				continue
 			}
@@ -489,7 +532,7 @@ func (s *Server) handleMessages(w http.ResponseWriter, r *http.Request) {
 			}
 			rec.CostUSD = s.costFor(tg.Model, rec.InTok, rec.OutTok, rec.CacheRead, rec.CacheWrite)
 			s.budgets.add(token, rec.CostUSD, time.Now())
-			s.logRecord(rec)
+			logR(rec)
 
 			if ck != "" && len(respBytes) > 0 {
 				s.cachePutAll(ck, cache.Entry{Body: respBytes, In: rec.InTok, Out: rec.OutTok})
@@ -515,7 +558,7 @@ func (s *Server) handleMessages(w http.ResponseWriter, r *http.Request) {
 		status = http.StatusServiceUnavailable
 	}
 	writeAnthropicError(w, status, "overloaded_error", msg)
-	s.logRecord(logstore.Record{
+	logR(logstore.Record{
 		Time: time.Now(), Token: s.tokenLabel(token), Model: mreq.Model,
 		Status: status, Error: core.TrimString(msg, 400),
 	})
@@ -593,6 +636,19 @@ func (s *Server) handleModels(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	catalog := s.reg.Catalog()
+	if r.URL.Query().Get("format") == "openai" {
+		type om struct {
+			ID      string `json:"id"`
+			Object  string `json:"object"`
+			OwnedBy string `json:"owned_by"`
+		}
+		data := make([]om, 0, len(catalog))
+		for _, e := range catalog {
+			data = append(data, om{ID: e.ID, Object: "model", OwnedBy: e.Provider})
+		}
+		writeJSON(w, http.StatusOK, map[string]any{"object": "list", "data": data})
+		return
+	}
 	type m struct {
 		Type        string `json:"type"`
 		ID          string `json:"id"`

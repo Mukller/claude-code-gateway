@@ -94,6 +94,7 @@ func New(cfg config.Provider) *Provider {
 		tfs:  tfs,
 	}
 	p.pool.SetWeight(cfg.Weight)
+	p.pool.SetFillFirst(strings.EqualFold(cfg.KeyStrategy, "fill_first"))
 	return p
 }
 

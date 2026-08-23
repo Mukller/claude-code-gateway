@@ -75,6 +75,31 @@ func (s *Server) handleMetrics(w http.ResponseWriter, r *http.Request) {
 	wr("# TYPE ccg_go_goroutines gauge\nccg_go_goroutines %d\n", runtime.NumGoroutine())
 	wr("# TYPE ccg_go_heap_bytes gauge\nccg_go_heap_bytes %d\n", ms.HeapAlloc)
 
+	buckets := []float64{50, 100, 250, 500, 1000, 2500, 5000}
+	counts := make([]int64, len(buckets)+1)
+	var total int64
+	for _, rec := range v.Recent {
+		total++
+		placed := false
+		for i, b := range buckets {
+			if float64(rec.LatencyMs) <= b {
+				counts[i]++
+				placed = true
+				break
+			}
+		}
+		if !placed {
+			counts[len(buckets)]++
+		}
+	}
+	wr("# TYPE ccg_latency_ms_bucket histogram\n")
+	cum := int64(0)
+	for i, b := range buckets {
+		cum += counts[i]
+		wr("ccg_latency_ms_bucket{le=%q} %d\n", fmt.Sprintf("%.0f", b), cum)
+	}
+	wr("ccg_latency_ms_bucket{le=\"+Inf\"} %d\n", total)
+
 	w.Header().Set("Content-Type", "text/plain; version=0.0.4; charset=utf-8")
 	w.Write([]byte(b.String()))
 }

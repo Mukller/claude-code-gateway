@@ -23,10 +23,11 @@ type keyState struct {
 }
 
 type Pool struct {
-	mu     sync.Mutex
-	keys   []*keyState
-	idx    int
-	weight int
+	mu        sync.Mutex
+	keys      []*keyState
+	idx       int
+	weight    int
+	fillFirst bool
 }
 
 func NewPool(keys []string) *Pool {
@@ -46,6 +47,12 @@ func (p *Pool) SetWeight(w int) {
 	p.mu.Lock()
 	defer p.mu.Unlock()
 	p.weight = w
+}
+
+func (p *Pool) SetFillFirst(v bool) {
+	p.mu.Lock()
+	defer p.mu.Unlock()
+	p.fillFirst = v
 }
 
 func (p *Pool) Len() int {
@@ -87,6 +94,16 @@ func (p *Pool) Pick() (string, bool) {
 		}
 		if fallback == nil || k.coolUntil.Before(fallback.coolUntil) {
 			fallback = k
+		}
+		if p.fillFirst && i == 0 && now.After(k.coolUntil) {
+			break
+		}
+	}
+	if p.fillFirst {
+		for _, k := range p.keys {
+			if now.After(k.coolUntil) {
+				return k.value, true
+			}
 		}
 	}
 	return fallback.value, true

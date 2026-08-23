@@ -41,6 +41,7 @@ type Registry struct {
 	defChain   []string
 	alias      bool
 	scenarios  config.Scenarios
+	affinity   bool
 	discovered map[string][]string
 
 	genMu     sync.Mutex
@@ -99,6 +100,7 @@ func (r *Registry) apply(routing *config.Routing, provCfgs []config.Provider) {
 	r.defChain = routing.DefaultChain
 	r.alias = routing.AliasClaudePrefix
 	r.scenarios = routing.Scenarios
+	r.affinity = routing.SessionAffinity
 	r.discovered = map[string][]string{}
 }
 
@@ -158,6 +160,7 @@ type ResolveInfo struct {
 	EstTokens int64
 	HasImage  bool
 	Thinking  bool
+	SessionID string
 }
 
 func (r *Registry) Resolve(model string, inf ResolveInfo) ([]Target, string) {
@@ -165,6 +168,9 @@ func (r *Registry) Resolve(model string, inf ResolveInfo) ([]Target, string) {
 	defer r.mu.RUnlock()
 	now := time.Now()
 	pick := func(tg []Target, m string) ([]Target, string) {
+		if r.affinity && inf.SessionID != "" && len(tg) > 1 {
+			tg = stickyRotate(tg, inf.SessionID)
+		}
 		live := make([]Target, 0, len(tg))
 		for _, t := range tg {
 			if p := r.providers[t.Name]; p != nil && p.IsOpen(now) {
@@ -202,6 +208,24 @@ func chainTargets(chain []string, m string) []Target {
 		tg = append(tg, Target{Name: n, Model: m})
 	}
 	return tg
+}
+
+func stickyRotate(tg []Target, sessionID string) []Target {
+	h := fnv32(sessionID)
+	off := int(h) % len(tg)
+	out := make([]Target, 0, len(tg))
+	out = append(out, tg[off:]...)
+	out = append(out, tg[:off]...)
+	return out
+}
+
+func fnv32(s string) uint32 {
+	var h uint32 = 2166136261
+	for i := 0; i < len(s); i++ {
+		h ^= uint32(s[i])
+		h *= 16777619
+	}
+	return h
 }
 
 func (r *Registry) matchScenarioLocked(model string, inf ResolveInfo) ([]Target, string, bool) {

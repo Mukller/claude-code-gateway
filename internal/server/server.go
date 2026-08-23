@@ -104,7 +104,31 @@ func (s *Server) Handler() http.Handler {
 	mux.HandleFunc("/admin/reload", s.requireAuth(s.handleAdminReload))
 	mux.HandleFunc("/admin/config/yaml", s.requireAuth(s.handleConfigYaml))
 	mux.HandleFunc("/admin/config/rollback", s.requireAuth(s.handleConfigRollback))
-	return s.withRecovery(s.withAccessLog(mux))
+	mux.HandleFunc("/admin/flush-cache", s.requireAuth(s.handleFlushCache))
+	return s.withRecovery(s.withCORS(s.withAccessLog(mux)))
+}
+
+func (s *Server) withCORS(next http.Handler) http.Handler {
+	allowed := s.cfg.Server.CORSOrigins
+	if len(allowed) == 0 {
+		return next
+	}
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		origin := r.Header.Get("Origin")
+		for _, a := range allowed {
+			if a == "*" || a == origin {
+				w.Header().Set("Access-Control-Allow-Origin", a)
+				w.Header().Set("Access-Control-Allow-Headers", "x-api-key, authorization, content-type, anthropic-version, anthropic-beta")
+				w.Header().Set("Access-Control-Allow-Methods", "GET, POST, OPTIONS")
+				break
+			}
+		}
+		if r.Method == http.MethodOptions {
+			w.WriteHeader(http.StatusNoContent)
+			return
+		}
+		next.ServeHTTP(w, r)
+	})
 }
 
 type statusWriter struct {
@@ -134,6 +158,14 @@ func (s *Server) withAccessLog(next http.Handler) http.Handler {
 		st := sw.status
 		if st == 0 {
 			st = 200
+		}
+		if s.cfg.Logging.JSONFormat {
+			b, _ := json.Marshal(map[string]any{
+				"ts": start.UTC().Format(time.RFC3339Nano), "method": r.Method,
+				"path": r.URL.Path, "status": st, "ms": time.Since(start).Milliseconds(),
+			})
+			log.Println(string(b))
+			return
 		}
 		log.Printf("%s %s -> %d (%dms)", r.Method, r.URL.Path, st, time.Since(start).Milliseconds())
 	})

@@ -4,6 +4,7 @@ import (
 	"encoding/base64"
 	"encoding/json"
 	"log"
+	"net/http"
 	"os"
 	"strings"
 
@@ -100,6 +101,17 @@ func (s *Server) cachePutAll(key string, e cache.Entry) {
 	if rs, ok := s.storeBackend.(*state.RedisStore); ok && s.cacheTTL > 0 {
 		_ = rs.SetTTLBytes("cache:"+key, cacheEncode(e), s.cacheTTL)
 	}
+}
+
+func (s *Server) handleFlushCache(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodPost {
+		writeAnthropicError(w, http.StatusMethodNotAllowed, "invalid_request_error", "use POST")
+		return
+	}
+	if s.cache != nil {
+		s.cache.Flush()
+	}
+	writeJSON(w, http.StatusOK, map[string]any{"flushed": true})
 }
 
 func fileExists(p string) bool {

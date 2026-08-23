@@ -9,24 +9,25 @@ import (
 )
 
 type Record struct {
-	Time        time.Time `json:"time"`
-	Token       string    `json:"token,omitempty"`
-	RequestID   string    `json:"request_id,omitempty"`
-	Model       string    `json:"model"`
-	TargetModel string    `json:"target_model,omitempty"`
-	Provider    string    `json:"provider,omitempty"`
-	Status      int       `json:"status"`
-	LatencyMs   int64     `json:"latency_ms"`
-	TTFTMs      int64     `json:"ttft_ms,omitempty"`
-	Stream      bool      `json:"stream"`
-	Cached      bool      `json:"cached,omitempty"`
-	SemanticHit bool      `json:"semantic_hit,omitempty"`
-	InTok       int64     `json:"input_tokens"`
-	OutTok      int64     `json:"output_tokens"`
-	CacheRead   int64     `json:"cache_read_tokens,omitempty"`
-	CacheWrite  int64     `json:"cache_write_tokens,omitempty"`
-	CostUSD     float64   `json:"cost_usd"`
-	Error       string    `json:"error,omitempty"`
+	Time        time.Time      `json:"time"`
+	Token       string         `json:"token,omitempty"`
+	RequestID   string         `json:"request_id,omitempty"`
+	Model       string         `json:"model"`
+	TargetModel string         `json:"target_model,omitempty"`
+	Provider    string         `json:"provider,omitempty"`
+	Status      int            `json:"status"`
+	LatencyMs   int64          `json:"latency_ms"`
+	TTFTMs      int64          `json:"ttft_ms,omitempty"`
+	Stream      bool           `json:"stream"`
+	Cached      bool           `json:"cached,omitempty"`
+	SemanticHit bool           `json:"semantic_hit,omitempty"`
+	InTok       int64          `json:"input_tokens"`
+	OutTok      int64          `json:"output_tokens"`
+	CacheRead   int64          `json:"cache_read_tokens,omitempty"`
+	CacheWrite  int64          `json:"cache_write_tokens,omitempty"`
+	CostUSD     float64        `json:"cost_usd"`
+	Metadata    map[string]any `json:"metadata,omitempty"`
+	Error       string         `json:"error,omitempty"`
 }
 
 type Stat struct {
