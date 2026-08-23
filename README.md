@@ -31,6 +31,12 @@
 - **Логи и стоимость**: каждая запись — токены, latency, статус, оценка стоимости в USD; JSONL-файл + агрегаты
 - **Кэш ответов (opt-in)**: одинаковые non-stream запросы отдаются из LRU+TTL кэша
   (`cache.enabled: true`) — для реплеев и оценок; в логе такие записи помечены `"cached":true`
+- **MCP-сервер** (как в OmniRoute): управляй гейтвеем из Claude — статистика, логи, модели,
+  бюджеты, hot-reload и оценка стоимости. HTTP-транспорт `/mcp` или stdio (`-mcp`)
+- **Трансформеры запросов** (как transformers в CCR): `max_tokens_cap`, `set:key=value`,
+  `reasoning_effort`, `drop_keys`, `system_prefix` — на уровне провайдера
+- **Комбо-модели**: один алиас → цепочка разных моделей с фолбэком
+  (`combo/fast` → glm-flash, затем gpt-oss)
 - **Сценарная маршрутизация** (идея из claude-code-router): отдельные цепочки для
   длинного контекста (`long_context.threshold_tokens`), запросов с картинками (`image`)
   и thinking-запросов (`thinking`) — например, тяжёлый контекст уходит на модель с большим окном
@@ -150,6 +156,44 @@ webhooks:
     timeout: 5s
 ```
 
+## MCP-сервер
+
+Гейтвей сам выступает MCP-сервером — Claude (Desktop / Code) получает инструменты
+`gateway_stats`, `gateway_logs`, `gateway_models`, `gateway_providers`, `gateway_tokens`,
+`gateway_reload` и `estimate_cost`.
+
+HTTP-транспорт:
+
+```bash
+claude mcp add --transport http ccg http://localhost:8090/mcp --header "x-api-key: ccg-admin-token"
+```
+
+Stdio-транспорт (процесс подключается к гейтвею локально):
+
+```bash
+claude mcp add ccg -- ./bin/gateway -config config.yaml -mcp
+```
+
+## Трансформеры и комбо
+
+```yaml
+providers:
+  - name: nine-router
+    type: openai
+    # ...
+    transformers:
+      - "max_tokens_cap:16384"
+      - "reasoning_effort:high"
+      - "system_prefix:Отвечай по-русски."
+
+routing:
+  rules:
+    - prefix: "combo/fast"       # модель combo/fast в Claude Code
+      targets:
+        - { provider: nine-router, model: ag/gemini-3.7-flash-low }
+        - { provider: nine-router, model: ag/gpt-oss-120b-medium }
+```
+
 ```bash
 curl http://localhost:8090/healthz
 curl -H "x-api-key: ccg-admin-token" http://localhost:8090/admin/stats
@@ -209,6 +253,6 @@ rate limit, стриминг.
 Идеи честно украдены у лучших в классе:
 
 - [claude-code-router](https://github.com/musistudio/claude-code-router) — сценарная маршрутизация
-  (longContext / image / think), алиасы для пикера моделей
+  (longContext / image / think), трансформеры запросов, алиасы для пикера моделей
 - [LiteLLM](https://github.com/BerriAI/litellm) — виртуальные ключи с бюджетами и spend tracking
-- [OmniRoute](https://github.com/diegosouzapw/OmniRoute) — фолбэк-цепочки, model discovery, дашборд
+- [OmniRoute](https://github.com/diegosouzapw/OmniRoute) — MCP-сервер, фолбэк-цепочки, model discovery, дашборд

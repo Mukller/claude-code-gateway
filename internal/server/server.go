@@ -12,6 +12,7 @@ import (
 	"claude-code-gateway/internal/cache"
 	"claude-code-gateway/internal/config"
 	"claude-code-gateway/internal/logstore"
+	"claude-code-gateway/internal/mcp"
 	"claude-code-gateway/internal/pricing"
 	"claude-code-gateway/internal/provider"
 	"claude-code-gateway/internal/ratelimit"
@@ -28,6 +29,7 @@ type Server struct {
 	cache      *cache.Cache
 	hooks      []webhookTarget
 	budgets    *budgets
+	mcp        *mcp.Handler
 	started    time.Time
 	tokens     map[string]bool
 	ConfigPath string
@@ -58,6 +60,7 @@ func New(cfg *config.Config, reg *provider.Registry, store *logstore.Store, pric
 		}
 	}
 	s.budgets = newBudgets(cfg.Clients)
+	s.mcp = s.buildMCP()
 	return s
 }
 
@@ -74,6 +77,7 @@ func (s *Server) Handler() http.Handler {
 	mux.HandleFunc("/healthz", s.handleHealth)
 	mux.HandleFunc("/metrics", s.requireAuth(s.handleMetrics))
 	mux.HandleFunc("/admin/dashboard", s.handleDashboard)
+	mux.HandleFunc("/mcp", s.requireAuth(s.handleMCP))
 	mux.HandleFunc("/admin/stats", s.requireAuth(s.handleAdminStats))
 	mux.HandleFunc("/admin/logs", s.requireAuth(s.handleAdminLogs))
 	mux.HandleFunc("/admin/tokens", s.requireAuth(s.handleAdminTokens))

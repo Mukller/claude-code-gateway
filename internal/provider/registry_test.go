@@ -57,6 +57,36 @@ func TestRegistrySwap(t *testing.T) {
 	}
 }
 
+func TestRegistryComboTargets(t *testing.T) {
+	reg := NewRegistry(&config.Routing{
+		Rules: []config.Rule{
+			{
+				Prefix: "combo/fast",
+				Targets: []config.RouteTarget{
+					{Provider: "cheap", Model: "glm-x"},
+					{Provider: "premium", Model: "claude-haiku"},
+				},
+			},
+		},
+	}, []config.Provider{
+		{Name: "cheap", Type: "openai", BaseURL: "https://c.test/v1", Keys: []string{"k"}},
+		{Name: "premium", Type: "anthropic", BaseURL: "https://p.test", Keys: []string{"k"}},
+	})
+	tg, m := reg.Resolve("combo/fast", ResolveInfo{})
+	if len(tg) != 2 {
+		t.Fatalf("targets = %+v", tg)
+	}
+	if tg[0].Name != "cheap" || tg[0].Model != "glm-x" {
+		t.Fatalf("target[0] = %+v", tg[0])
+	}
+	if tg[1].Name != "premium" || tg[1].Model != "claude-haiku" {
+		t.Fatalf("target[1] = %+v", tg[1])
+	}
+	if m != "glm-x" {
+		t.Fatalf("out model = %s", m)
+	}
+}
+
 func TestRegistryAliasAfterSwap(t *testing.T) {
 	reg := NewRegistry(&config.Routing{AliasClaudePrefix: true}, []config.Provider{
 		{Name: "a", Type: "openai", BaseURL: "https://a.test/v1", Keys: []string{"k"}},

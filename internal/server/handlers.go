@@ -127,7 +127,20 @@ func buildPayload(p *provider.Provider, targetModel string, body []byte, mreq *c
 			cr.StreamOptions = &core.StreamOptions{IncludeUsage: true}
 		}
 		out, err := json.Marshal(cr)
-		return out, "/v1/chat/completions", err
+		if err != nil {
+			return nil, "", err
+		}
+		if tfs := p.Transforms(); len(tfs) > 0 {
+			var m map[string]any
+			if json.Unmarshal(out, &m) == nil {
+				provider.ApplyTransforms(m, tfs)
+				out, err = json.Marshal(m)
+				if err != nil {
+					return nil, "", err
+				}
+			}
+		}
+		return out, "/v1/chat/completions", nil
 	}
 }
 

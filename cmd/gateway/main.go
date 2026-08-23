@@ -27,6 +27,7 @@ func main() {
 	cfgPath := flag.String("config", "config.yaml", "path to config file")
 	launch := flag.Bool("launch", false, "start gateway and spawn `claude` with env injected")
 	healthcheck := flag.Bool("healthcheck", false, "probe /healthz and exit with 0/1")
+	stdioMCP := flag.Bool("mcp", false, "run MCP server over stdio (for claude mcp add)")
 	showVersion := flag.Bool("version", false, "print version and exit")
 	flag.Parse()
 	if *showVersion {
@@ -78,6 +79,15 @@ func main() {
 	srv := server.New(cfg, reg, store, prices)
 	srv.ConfigPath = *cfgPath
 	server.Version = version
+
+	if *stdioMCP {
+		log.SetFlags(0)
+		if err := srv.ServeMCPStdio(os.Stdin, os.Stdout); err != nil {
+			log.Fatalf("mcp stdio: %v", err)
+		}
+		return
+	}
+
 	httpSrv := &http.Server{
 		Addr:              cfg.Server.Listen,
 		Handler:           srv.Handler(),

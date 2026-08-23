@@ -22,10 +22,11 @@ type CatalogEntry struct {
 }
 
 type compiledRule struct {
-	prefix string
-	strip  bool
-	chain  []string
-	mmap   map[string]string
+	prefix  string
+	strip   bool
+	chain   []string
+	mmap    map[string]string
+	targets []Target
 }
 
 type Registry struct {
@@ -64,12 +65,16 @@ func (r *Registry) apply(routing *config.Routing, provCfgs []config.Provider) {
 	}
 	var rules []compiledRule
 	for _, rc := range routing.Rules {
-		rules = append(rules, compiledRule{
+		cr := compiledRule{
 			prefix: rc.Prefix,
 			strip:  rc.StripPrefix,
 			chain:  rc.Chain,
 			mmap:   rc.ModelMap,
-		})
+		}
+		for _, t := range rc.Targets {
+			cr.targets = append(cr.targets, Target{Name: t.Provider, Model: t.Model})
+		}
+		rules = append(rules, cr)
 	}
 	for i := 0; i < len(rules); i++ {
 		for j := i + 1; j < len(rules); j++ {
@@ -192,6 +197,11 @@ func (r *Registry) matchScenarioLocked(model string, inf ResolveInfo) ([]Target,
 func (r *Registry) matchRulesLocked(model string) ([]Target, string, bool) {
 	for _, ru := range r.rules {
 		if ru.prefix == "" || strings.HasPrefix(model, ru.prefix) {
+			if len(ru.targets) > 0 {
+				tg := make([]Target, len(ru.targets))
+				copy(tg, ru.targets)
+				return tg, tg[0].Model, true
+			}
 			m := model
 			if ru.strip && ru.prefix != "" {
 				m = strings.TrimPrefix(m, ru.prefix)

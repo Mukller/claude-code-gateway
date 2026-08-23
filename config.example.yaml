@@ -40,6 +40,13 @@ providers:
     discover_models: true
     refresh_interval: 15m
     send_stream_options: false    # true = просить у upstream точный usage в стриме
+    # Трансформеры исходящих запросов (как transformers в claude-code-router):
+    # transformers:
+    #   - "max_tokens_cap:8192"          # зажать max_tokens
+    #   - "set:temperature=0.3"          # выставить/перезаписать любое поле
+    #   - "reasoning_effort:high"        # reasoning_effort для OpenAI-стиля
+    #   - "drop_keys:metadata,user"      # выкинуть поля
+    #   - "system_prefix:Отвечай кратко."  # дописать в начало system
 
   # Прямой Anthropic — раскомментируй и задай ANTHROPIC_API_KEY
   # - name: anthropic
@@ -96,6 +103,11 @@ routing:
   #   thinking:                  # thinking/extended-thinking запросы
   #     chain: [thinker-provider]
   rules:
+    # Комбо-модель: один алиас -> цепочка РАЗНЫХ моделей (фолбэк внутри комбо)
+    # - prefix: "combo/fast"
+    #   targets:
+    #     - { provider: nine-router, model: ag/gemini-3.7-flash-low }
+    #     - { provider: nine-router, model: ag/gpt-oss-120b-medium }
     # model "anthropic/claude-*" уходит напрямую в Anthropic (если провайдер включён)
     # - prefix: "anthropic/"
     #   strip_prefix: true

@@ -68,6 +68,7 @@ type Provider struct {
 	DiscoverModels     bool              `yaml:"discover_models"`
 	RefreshInterval    time.Duration     `yaml:"refresh_interval"`
 	Models             []string          `yaml:"models"`
+	Transformers       []string          `yaml:"transformers"`
 	SendStreamOptions  bool              `yaml:"send_stream_options"`
 	Region             string            `yaml:"region"`
 	ServiceAccountJSON string            `yaml:"service_account_json"`
@@ -100,6 +101,12 @@ type Rule struct {
 	StripPrefix bool              `yaml:"strip_prefix"`
 	Chain       []string          `yaml:"chain"`
 	ModelMap    map[string]string `yaml:"model_map"`
+	Targets     []RouteTarget     `yaml:"targets"`
+}
+
+type RouteTarget struct {
+	Provider string `yaml:"provider"`
+	Model    string `yaml:"model"`
 }
 
 type Retry struct {

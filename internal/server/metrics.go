@@ -6,36 +6,7 @@ import (
 	"runtime"
 	"sort"
 	"strings"
-
-	"claude-code-gateway/internal/config"
-	"claude-code-gateway/internal/pricing"
 )
-
-func (s *Server) handleAdminReload(w http.ResponseWriter, r *http.Request) {
-	if r.Method != http.MethodPost && r.Method != http.MethodGet {
-		writeAnthropicError(w, http.StatusMethodNotAllowed, "invalid_request_error", "use POST")
-		return
-	}
-	if s.ConfigPath == "" {
-		writeAnthropicError(w, http.StatusInternalServerError, "api_error", "config path unknown")
-		return
-	}
-	fresh, err := config.Load(s.ConfigPath)
-	if err != nil {
-		writeAnthropicError(w, http.StatusBadRequest, "invalid_request_error", "reload failed: "+err.Error())
-		return
-	}
-	if err := s.reg.Swap(&fresh.Routing, fresh.Providers); err != nil {
-		writeAnthropicError(w, http.StatusBadRequest, "invalid_request_error", err.Error())
-		return
-	}
-	tbl := pricing.New(fresh.Pricing)
-	s.prices.Store(&tbl)
-	writeJSON(w, http.StatusOK, map[string]any{
-		"reloaded":         []string{"providers", "routing", "pricing"},
-		"restart_required": []string{"listen", "auth.tokens", "cache", "webhooks"},
-	})
-}
 
 func (s *Server) isAdminToken(token string) bool {
 	return (s.cfg.Auth.AdminToken != "" && token == s.cfg.Auth.AdminToken) || s.tokens[token]

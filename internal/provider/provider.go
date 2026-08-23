@@ -6,6 +6,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"io"
+	"log"
 	"net/http"
 	"os"
 	"strings"
@@ -19,6 +20,7 @@ type Provider struct {
 	cfg    config.Provider
 	pool   *Pool
 	http   *http.Client
+	tfs    []TransformFunc
 	saOnce sync.Once
 	saSrc  *SATokenSource
 	saErr  error
@@ -55,19 +57,25 @@ func New(cfg config.Provider) *Provider {
 			cfg.AnthropicVersion = "2023-06-01"
 		}
 	}
+	tfs, err := ParseTransforms(cfg.Transformers)
+	if err != nil {
+		log.Printf("[provider %q] transformers: %v", cfg.Name, err)
+	}
 	return &Provider{
 		cfg:  cfg,
 		pool: NewPool(cfg.Keys),
 		http: &http.Client{Timeout: 0},
+		tfs:  tfs,
 	}
 }
 
-func (p *Provider) Name() string             { return p.cfg.Name }
-func (p *Provider) Type() string             { return p.cfg.Type }
-func (p *Provider) Pool() *Pool              { return p.pool }
-func (p *Provider) StaticModels() []string   { return p.cfg.Models }
-func (p *Provider) SendStreamOptions() bool  { return p.cfg.SendStreamOptions }
-func (p *Provider) AnthropicVersion() string { return p.cfg.AnthropicVersion }
+func (p *Provider) Transforms() []TransformFunc { return p.tfs }
+func (p *Provider) Name() string                { return p.cfg.Name }
+func (p *Provider) Type() string                { return p.cfg.Type }
+func (p *Provider) Pool() *Pool                 { return p.pool }
+func (p *Provider) StaticModels() []string      { return p.cfg.Models }
+func (p *Provider) SendStreamOptions() bool     { return p.cfg.SendStreamOptions }
+func (p *Provider) AnthropicVersion() string    { return p.cfg.AnthropicVersion }
 func (p *Provider) DiscoversModels() bool {
 	return p.cfg.DiscoverModels && p.Type() == "openai" && p.Pool().Len() > 0
 }
