@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"io"
 	"net/http"
+	"strconv"
 	"strings"
 	"time"
 
@@ -17,6 +18,30 @@ import (
 
 const maxBodyBytes = 64 << 20
 const maxResponseBytes = 128 << 20
+
+func parseRetryAfter(h string) time.Duration {
+	h = strings.TrimSpace(h)
+	if h == "" {
+		return 0
+	}
+	if secs, err := strconv.Atoi(h); err == nil && secs > 0 {
+		d := time.Duration(secs) * time.Second
+		if d > 10*time.Minute {
+			d = 10 * time.Minute
+		}
+		return d
+	}
+	if t, err := http.ParseTime(h); err == nil {
+		d := time.Until(t)
+		if d > 0 {
+			if d > 10*time.Minute {
+				d = 10 * time.Minute
+			}
+			return d
+		}
+	}
+	return 0
+}
 
 type FailKind int
 
@@ -155,7 +180,7 @@ func (s *Server) handleMessages(w http.ResponseWriter, r *http.Request) {
 		writeAnthropicError(w, http.StatusUnauthorized, "authentication_error", "invalid or missing API token")
 		return
 	}
-	if !s.limiter.Allow(time.Now()) {
+	if !s.limiter.Allow(token, time.Now()) {
 		writeAnthropicError(w, http.StatusTooManyRequests, "rate_limit_error", "rate limit exceeded")
 		return
 	}
@@ -241,7 +266,8 @@ func (s *Server) handleMessages(w http.ResponseWriter, r *http.Request) {
 				case failHard:
 					p.Pool().Report(key, provider.HardFail)
 				case failSoft:
-					p.Pool().Report(key, provider.SoftFail)
+					hint := parseRetryAfter(resp.Header.Get("Retry-After"))
+					p.Pool().ReportHint(key, provider.SoftFail, hint)
 				}
 				rec.Status = resp.Status
 				rec.Error = core.TrimString(FirstNonEmptyStr(resp.ErrMsg, string(data)), 400)
@@ -479,6 +505,7 @@ func (s *Server) handleHealth(w http.ResponseWriter, r *http.Request) {
 	}
 	writeJSON(w, http.StatusOK, map[string]any{
 		"status":    "ok",
+		"version":   Version,
 		"uptime_s":  int64(time.Since(s.started).Seconds()),
 		"providers": provs,
 		"models":    len(s.reg.Catalog()),

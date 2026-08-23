@@ -1,4 +1,4 @@
-.PHONY: build run test vet tidy docker-build docker-up docker-down
+.PHONY: build run test vet fmt tidy docker-build docker-up docker-down
 
 build:
 	go build -o bin/gateway$(shell go env GOEXE) ./cmd/gateway
@@ -11,6 +11,9 @@ test:
 
 vet:
 	go vet ./...
+
+fmt:
+	gofmt -w .
 
 tidy:
 	go mod tidy

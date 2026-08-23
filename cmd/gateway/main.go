@@ -77,6 +77,7 @@ func main() {
 
 	srv := server.New(cfg, reg, store, prices)
 	srv.ConfigPath = *cfgPath
+	server.Version = version
 	httpSrv := &http.Server{
 		Addr:              cfg.Server.Listen,
 		Handler:           srv.Handler(),

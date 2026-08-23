@@ -21,7 +21,8 @@
     OAuth-токен кешируется и рефрешится автоматически)
 - **Веб-дашборд** `/admin/dashboard`: карточки за сегодня, разбивка по провайдерам/моделям,
   лента последних запросов с ошибками, автообновление
-- **Ротация ключей**: несколько ключей на провайдера, round-robin, cooldown при 401/403/429/5xx с экспоненциальным backoff
+- **Ротация ключей**: несколько ключей на провайдера, round-robin, cooldown при 401/403/429/5xx
+  с экспоненциальным backoff + уважение `Retry-After` от upstream
 - **Фолбэк-цепочки**: модель → список целей; при сбое ключа/провайдера запрос идёт дальше
 - **Маршрутизация по префиксу**: правила вида `anthropic/* → provider anthropic`
 - **Model discovery**: список моделей подтягивается с upstream (`/v1/models`) автоматически
@@ -30,7 +31,7 @@
 - **Логи и стоимость**: каждая запись — токены, latency, статус, оценка стоимости в USD; JSONL-файл + агрегаты
 - **Кэш ответов (opt-in)**: одинаковые non-stream запросы отдаются из LRU+TTL кэша
   (`cache.enabled: true`) — для реплеев и оценок; в логе такие записи помечены `"cached":true`
-- **Rate limit**, admin-API (`/admin/stats`, `/admin/logs`, `POST /admin/reload` — горячая
+- **Rate limit** (на токен клиента), admin-API (`/admin/stats`, `/admin/logs`, `POST /admin/reload` — горячая
   перезагрузка провайдеров/роутинга/прайсинга без рестарта), `/metrics` в формате Prometheus,
   healthcheck (`/healthz` + флаг `-healthcheck` для docker/compose)
 - **Вебхуки**: push событий `usage`/`error` на твой URL с HMAC-подписью (`X-CCG-Signature`)
@@ -180,12 +181,17 @@ make docker-up # сборка+запуск в docker
 cmd/gateway             точка входа + лаунчер claude
 internal/core           типы Anthropic/OpenAI, трансляция протоколов (req/resp/SSE), сборщики стримов
 internal/provider       пул ключей, исполнение запросов, роутинг; SigV4 и event-stream для Bedrock
-internal/server         HTTP: /v1/messages, /v1/models, админка + встроенный дашборд
-internal/logstore       JSONL-лог + агрегаты (день/модель/провайдер)
+internal/server         HTTP: /v1/messages, /v1/models, админка, дашборд, /metrics; e2e-тесты
+internal/cache          LRU+TTL кэш ответов
+internal/logstore       JSONL-лог + агрегаты (день/час/модель/провайдер)
 internal/pricing        glob-таблица цен, расчёт стоимости
-internal/ratelimit      простой лимитер RPM
+internal/ratelimit      лимитер RPM на токен
 internal/config         YAML + ${ENV}
 ```
+
+Тесты покрывают трансляцию протоколов, SigV4 (вектор AWS), event-stream декодер, GCP OAuth-флоу,
+кэш, вебхуки и сквозные сценарии через фейковые upstream: ротация ключей, фолбэк провайдеров,
+rate limit, стриминг.
 
 ## Roadmap
 

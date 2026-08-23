@@ -127,6 +127,12 @@ func (s *Store) Add(r Record) {
 	}
 }
 
+func (s *Store) Close() error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	return s.f.Close()
+}
+
 func copyStat(m map[string]*Stat) map[string]Stat {
 	out := make(map[string]Stat, len(m))
 	for k, v := range m {

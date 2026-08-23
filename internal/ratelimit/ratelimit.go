@@ -5,28 +5,36 @@ import (
 	"time"
 )
 
-type Limiter struct {
-	mu  sync.Mutex
-	rpm int
+type bucket struct {
 	win int64
 	n   int
 }
 
-func New(rpm int) *Limiter {
-	return &Limiter{rpm: rpm}
+type Limiter struct {
+	mu      sync.Mutex
+	rpm     int
+	buckets map[string]*bucket
 }
 
-func (l *Limiter) Allow(now time.Time) bool {
+func New(rpm int) *Limiter {
+	return &Limiter{rpm: rpm, buckets: map[string]*bucket{}}
+}
+
+func (l *Limiter) Allow(key string, now time.Time) bool {
 	if l.rpm <= 0 {
 		return true
 	}
 	l.mu.Lock()
 	defer l.mu.Unlock()
 	w := now.Unix() / 60
-	if w != l.win {
-		l.win = w
-		l.n = 0
+	b, ok := l.buckets[key]
+	if !ok || b.win != w {
+		if len(l.buckets) > 4096 {
+			l.buckets = map[string]*bucket{}
+		}
+		b = &bucket{win: w}
+		l.buckets[key] = b
 	}
-	l.n++
-	return l.n <= l.rpm
+	b.n++
+	return b.n <= l.rpm
 }

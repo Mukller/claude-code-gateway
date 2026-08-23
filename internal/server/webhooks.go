@@ -101,14 +101,26 @@ func (s *Server) notifyHooks(r logstore.Record) {
 		if !t.wants(event) {
 			continue
 		}
-		go deliver(t, event, body)
+		go deliverWithRetry(t, event, body)
 	}
 }
 
-func deliver(t webhookTarget, event string, body []byte) {
+func deliverWithRetry(t webhookTarget, event string, body []byte) {
+	for attempt := 0; attempt < 2; attempt++ {
+		if attempt > 0 {
+			time.Sleep(2 * time.Second)
+		}
+		if deliverOnce(t, event, body) {
+			return
+		}
+	}
+	log.Printf("[webhook] %s %s: dropped after retry", event, t.url)
+}
+
+func deliverOnce(t webhookTarget, event string, body []byte) bool {
 	req, err := http.NewRequest(http.MethodPost, t.url, bytes.NewReader(body))
 	if err != nil {
-		return
+		return false
 	}
 	req.Header.Set("Content-Type", "application/json")
 	req.Header.Set("X-CCG-Event", event)
@@ -121,10 +133,15 @@ func deliver(t webhookTarget, event string, body []byte) {
 	resp, err := t.client.Do(req)
 	if err != nil {
 		log.Printf("[webhook] %s %s: %v", event, t.url, err)
-		return
+		return false
 	}
 	defer resp.Body.Close()
-	if resp.StatusCode >= 300 {
-		log.Printf("[webhook] %s %s: status %d", event, t.url, resp.StatusCode)
+	if resp.StatusCode >= 500 {
+		log.Printf("[webhook] %s %s: status %d, will retry", event, t.url, resp.StatusCode)
+		return false
 	}
+	if resp.StatusCode >= 300 {
+		log.Printf("[webhook] %s %s: status %d (not retrying)", event, t.url, resp.StatusCode)
+	}
+	return true
 }

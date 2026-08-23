@@ -46,7 +46,7 @@ h2{font-size:14px;margin-bottom:10px;color:var(--dim);font-weight:600;text-trans
   <button onclick="saveTok()">OK</button>
 </div>
 <h1>claude-code-gateway</h1>
-<div class="sub">uptime <span id="uptime">–</span> · моделей: <span id="nmodels">–</span> · автообновление 5с</div>
+<div class="sub">v<span id="ver">?</span> · uptime <span id="uptime">–</span> · моделей: <span id="nmodels">–</span> · автообновление 5с</div>
 
 <div id="gate" class="hidden"><div class="card"><div class="lbl">доступ</div><div class="val err" style="font-size:14px">Введи токен сверху (GATEWAY_TOKEN или GATEWAY_ADMIN_TOKEN)</div></div></div>
 
@@ -113,6 +113,7 @@ async function load(){
 
     $('uptime').textContent = Math.floor(health.uptime_s/3600)+'ч '+Math.floor(health.uptime_s%3600/60)+'м';
     $('nmodels').textContent = health.models;
+    if (health.version) $('ver').textContent = health.version;
     $('providers').innerHTML = health.providers.map(p =>
       `<div class="chip"><b>${esc(p.name)}</b> · ${p.type} · ключей: <span class="keys">${p.keys}</span></div>`).join('');
 
@@ -170,7 +171,7 @@ async function load(){
         <td class="num">${fmt(r.latency_ms)}</td>
         <td class="num">${fmt(r.input_tokens)}/${fmt(r.output_tokens)}</td>
         <td class="num">${fmtCost(r.cost_usd)}</td>
-        <td><span class="st ${cls}"></span>${r.status||'ERR'}${r.error?` <span class="errmsg" title="${esc(r.error)}">${esc(r.error)}</span>`:''}</td></tr>`;
+        <td><span class="st ${cls}"></span>${r.status||'ERR'}${r.cached?' <span style="color:var(--warn)">[cache]</span>':''}${r.error?` <span class="errmsg" title="${esc(r.error)}">${esc(r.error)}</span>`:''}</td></tr>`;
     }).join('') : '<tr><td colspan="7" class="empty">пока пусто — отправь запрос через Claude Code</td></tr>';
   } catch(e) {
     if (e.message === 'unauthorized'){ $('gate').classList.remove('hidden'); $('content').classList.add('hidden'); }

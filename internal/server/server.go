@@ -17,6 +17,8 @@ import (
 	"claude-code-gateway/internal/ratelimit"
 )
 
+var Version = "dev"
+
 type Server struct {
 	cfg        *config.Config
 	reg        *provider.Registry

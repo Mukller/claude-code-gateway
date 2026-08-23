@@ -79,6 +79,10 @@ func (p *Pool) Pick() (string, bool) {
 }
 
 func (p *Pool) Report(key string, kind FailKind) {
+	p.ReportHint(key, kind, 0)
+}
+
+func (p *Pool) ReportHint(key string, kind FailKind, minWait time.Duration) {
 	p.mu.Lock()
 	defer p.mu.Unlock()
 	now := time.Now()
@@ -95,6 +99,9 @@ func (p *Pool) Report(key string, kind FailKind) {
 			backoff := time.Duration(1<<uint(min(k.softFails-1, 5))) * 10 * time.Second
 			if backoff > 5*time.Minute {
 				backoff = 5 * time.Minute
+			}
+			if minWait > backoff {
+				backoff = minWait
 			}
 			if until := now.Add(backoff); until.After(k.coolUntil) {
 				k.coolUntil = until
