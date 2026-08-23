@@ -22,6 +22,12 @@ type Config struct {
 	Webhooks   []Webhook   `yaml:"webhooks"`
 	Clients    []Client    `yaml:"clients"`
 	Guardrails Guardrails  `yaml:"guardrails"`
+	State      State       `yaml:"state"`
+}
+
+type State struct {
+	RedisURL string `yaml:"redis_url"`
+	Prefix   string `yaml:"prefix"`
 }
 
 type Client struct {

@@ -1,4 +1,4 @@
-<!doctype html>
+﻿<!doctype html>
 <html lang="ru">
 <head>
 <meta charset="utf-8">
@@ -29,7 +29,7 @@ td.num,th.num{text-align:right;font-variant-numeric:tabular-nums}
 .st.s2{background:var(--ok)}.st.s4{background:var(--warn)}.st.s5,.st.sx{background:var(--err)}
 .errmsg{color:var(--err);max-width:340px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;display:inline-block;vertical-align:bottom}
 h2{font-size:14px;margin-bottom:10px;color:var(--dim);font-weight:600;text-transform:uppercase;letter-spacing:.5px}
-#tokpanel{position:fixed;top:18px;right:24px;display:flex;gap:8px;align-items:center}
+#tokpanel{position:fixed;top:18px;right:24px;display:flex;gap:8px;align-items:center;z-index:10}
 #tokpanel input{background:var(--card);border:1px solid var(--border);color:var(--text);border-radius:8px;padding:7px 10px;width:230px;font-size:12px}
 #tokpanel button{background:var(--acc);color:#04121f;border:none;border-radius:8px;padding:7px 14px;font-weight:600;cursor:pointer}
 .hidden{display:none!important}
@@ -38,13 +38,14 @@ h2{font-size:14px;margin-bottom:10px;color:var(--dim);font-weight:600;text-trans
 .bar{flex:1;background:linear-gradient(180deg,var(--acc),#1f6feb);border-radius:3px 3px 0 0;min-height:2px;position:relative;cursor:default}
 .bar:hover{filter:brightness(1.3)}
 .barlbl{position:absolute;bottom:-16px;left:50%;transform:translateX(-50%);font-size:9px;color:var(--dim);white-space:nowrap}
+.mini{background:var(--acc);color:#04121f;border:none;border-radius:6px;padding:4px 8px;cursor:pointer;font-weight:600}
 </style>
 </head>
 <body>
 <div id="tokpanel">
   <input id="tok" type="password" placeholder="admin / api token" autocomplete="off">
   <button onclick="saveTok()">OK</button>
-  <button title="Перечитать config.yaml (провайдеры/роутинг/прайсинг)" style="background:#30363d;color:var(--text)" onclick="doReload()">⟳ reload</button>
+  <button title="Перечитать config.yaml" style="background:#30363d;color:var(--text)" onclick="doReload()">⟳ reload</button>
 </div>
 <h1>claude-code-gateway</h1>
 <div class="sub">v<span id="ver">?</span> · uptime <span id="uptime">–</span> · моделей: <span id="nmodels">–</span> · автообновление 5с</div>
@@ -60,9 +61,6 @@ h2{font-size:14px;margin-bottom:10px;color:var(--dim);font-weight:600;text-trans
   <div class="card"><div class="lbl">Стоимость сегодня</div><div class="val ok" id="t-cost">–</div></div>
 </div>
 
-<h2>Всего за всё время</h2>
-<table><tbody id="total"></tbody></table>
-
 <h2>За последние 24 часа (UTC)</h2>
 <table><tr><td style="padding:10px 12px 14px">
 <div class="bars" id="chart"></div>
@@ -76,11 +74,16 @@ h2{font-size:14px;margin-bottom:10px;color:var(--dim);font-weight:600;text-trans
 <h2>По провайдерам</h2>
 <table><thead><tr><th>Провайдер</th><th class="num">Запросы</th><th class="num">Ошибки</th><th class="num">In</th><th class="num">Out</th><th class="num">Cost</th></tr></thead><tbody id="byprov"></tbody></table>
 
-<h2>По моделям (топ-15 по стоимости)</h2>
-<table><thead><tr><th>Модель</th><th class="num">Запросы</th><th class="num">In</th><th class="num">Out</th><th class="num">Cost</th></tr></thead><tbody id="bymodel"></tbody></table>
-
 <h2>Клиенты и бюджеты</h2>
 <table><thead><tr><th>Имя</th><th>Токен</th><th class="num">Лимит $</th><th class="num">Потрачено</th><th class="num">Остаток</th><th>Период / сброс</th><th></th></tr></thead><tbody id="tokens"></tbody></table>
+
+<h2>Конфиг (config.yaml)</h2>
+<div style="margin-bottom:8px">
+  <button onclick="saveYaml()" class="mini" style="padding:6px 14px">Сохранить и применить</button>
+  <button onclick="rollbackYaml()" style="background:#30363d;color:var(--text);border:1px solid var(--border);border-radius:6px;padding:6px 14px;cursor:pointer">Откатить (.bak)</button>
+  <span id="yamlmsg" style="color:var(--dim);font-size:12px;margin-left:8px"></span>
+</div>
+<textarea id="yamled" spellcheck="false" style="width:100%;height:320px;background:#0a0e14;color:#c9d1d9;border:1px solid var(--border);border-radius:8px;padding:12px;font:12px/1.5 ui-monospace,Consolas,monospace;margin-bottom:20px"></textarea>
 
 <h2>Последние запросы</h2>
 <table><thead><tr><th>Время</th><th>Модель</th><th>Провайдер</th><th class="num">ms</th><th class="num">In/Out</th><th class="num">Cost</th><th>Статус</th></tr></thead><tbody id="recent"></tbody></table>
@@ -104,10 +107,9 @@ async function jget(url){
   return r.json();
 }
 
-function statRow(s){ return `<tr>
-  <td>${fmt(s.requests)}</td><td class="num">${fmt(s.errors)}</td>
+function statRow(s){ return `<td>${fmt(s.requests)}</td><td class="num">${fmt(s.errors)}</td>
   <td class="num">${fmt(s.input_tokens)}</td><td class="num">${fmt(s.output_tokens)}</td>
-  <td class="num">${fmtCost(s.cost_usd)}</td></tr>`; }
+  <td class="num">${fmtCost(s.cost_usd)}</td>`; }
 
 async function load(){
   try {
@@ -122,17 +124,16 @@ async function load(){
       `<div class="chip"><b>${esc(p.name)}</b> · ${p.type} · ключей: <span class="keys">${p.keys}</span></div>`).join('');
 
     $('t-req').textContent = fmt(stats.today.requests);
-    $('t-req').className = 'val' + (stats.today.errors? '':'');
     $('t-err').textContent = fmt(stats.today.errors);
     $('t-err').className = 'val ' + (stats.today.errors ? 'err':'ok');
     $('t-tok').textContent = fmt(stats.today.input_tokens)+' / '+fmt(stats.today.output_tokens);
     $('t-cost').textContent = fmtCost(stats.today.cost_usd);
 
-    $('total').innerHTML = '<tr>'+statRow(stats.total).replace(/^<tr>|<\/tr>$/g,'')+'</tr>';
+    $('total').innerHTML = '<tr>'+statRow(stats.total)+'</tr>';
 
     const byHour = stats.by_hour || {};
-    const bars = [];
     const nowH = new Date();
+    const bars = [];
     for (let i = 23; i >= 0; i--) {
       const d = new Date(Date.UTC(nowH.getUTCFullYear(), nowH.getUTCMonth(), nowH.getUTCDate(), nowH.getUTCHours() - i));
       const key = d.toISOString().slice(0,13);
@@ -159,39 +160,20 @@ async function load(){
     }).join('');
 
     const provs = Object.entries(stats.by_provider||{}).sort((a,b)=>b[1].cost_usd-a[1].cost_usd);
-    $('byprov').innerHTML = provs.length ? provs.map(([k,v])=>`<tr><td>${esc(k)}</td><td class="num">${fmt(v.requests)}</td><td class="num ${v.errors?'':''}">${fmt(v.errors)}</td><td class="num">${fmt(v.input_tokens)}</td><td class="num">${fmt(v.output_tokens)}</td><td class="num">${fmtCost(v.cost_usd)}</td></tr>`).join('')
+    $('byprov').innerHTML = provs.length ? provs.map(([k,v])=>`<tr><td>${esc(k)}</td><td class="num">${fmt(v.requests)}</td><td class="num">${fmt(v.errors)}</td><td class="num">${fmt(v.input_tokens)}</td><td class="num">${fmt(v.output_tokens)}</td><td class="num">${fmtCost(v.cost_usd)}</td></tr>`).join('')
       : '<tr><td colspan="6" class="empty">нет данных</td></tr>';
-
-    const models = Object.entries(stats.by_model||{}).sort((a,b)=>b[1].cost_usd-a[1].cost_usd).slice(0,15);
-    $('bymodel').innerHTML = models.length ? models.map(([k,v])=>`<tr><td>${esc(k)}</td><td class="num">${fmt(v.requests)}</td><td class="num">${fmt(v.input_tokens)}</td><td class="num">${fmt(v.output_tokens)}</td><td class="num">${fmtCost(v.cost_usd)}</td></tr>`).join('')
-      : '<tr><td colspan="5" class="empty">нет данных</td></tr>';
 
     jget('/admin/tokens').then(t => {
       $('tokens').innerHTML = (t.tokens||[]).map((tr,i) =>
         `<tr><td>${esc(tr.name)}</td><td style="color:var(--dim)">${esc(tr.token)}</td>`+
         `<td class="num">${tr.unlimited ? '∞' : fmtCost(tr.budget_usd)}</td>`+
-        `<td class="num">${fmtCost(tr.spent_usd)}${tr.semantic_hit?'':''}</td>`+
+        `<td class="num">${fmtCost(tr.spent_usd)}</td>`+
         `<td class="num">${tr.unlimited ? '—' : fmtCost(tr.remaining_usd)}</td>`+
         `<td>${esc(tr.period||'lifetime')}${tr.resets_at && !tr.unlimited ? '<br><span style="color:var(--dim)">'+new Date(tr.resets_at).toLocaleString('ru-RU')+'</span>':''}</td>`+
-        `<td>${tr.unlimited ? '' : `<input id="nb${i}" type="number" step="0.5" value="${tr.budget_usd}" style="width:80px;background:var(--card);border:1px solid var(--border);color:var(--text);border-radius:6px;padding:4px 6px"> <button onclick="updBudget('${esc(tr.name)}', ${i})" class="mini">✓</button>`}</td></tr>`
+        `<td>${tr.unlimited ? '' : `<input id="nb${i}" type="number" step="0.5" value="${tr.budget_usd}" style="width:80px;background:var(--bg);border:1px solid var(--border);color:var(--text);border-radius:6px;padding:4px 6px"> <button onclick="updBudget('${esc(tr.name)}', ${i})" class="mini">✓</button>`}</td></tr>`
       ).join('') || '<tr><td colspan="7" class="empty">клиенты не настроены (см. clients: в конфиге)</td></tr>';
-    }).catch(()=>{ $('tokens').innerHTML = ''; });
+    }).catch(()=>{});
 
-load();
-setInterval(load, 5000);
-
-async function updBudget(name, i){
-  const v = parseFloat(document.getElementById('nb'+i).value);
-  if (isNaN(v)) return;
-  await fetch('/admin/tokens/update', {
-    method:'POST',
-    headers:{'x-api-key': tok, 'Content-Type':'application/json'},
-    body: JSON.stringify({name, budget_usd:v})
-  });
-  load();
-}
-
-async function doReload(){
     const rec = [...(stats.recent||[])].reverse().slice(0,30);
     $('recent').innerHTML = rec.length ? rec.map(r=>{
       const cls = r.status>=500||r.status===0 ? 'sx' : r.status>=400 ? 's4' : 's2';
@@ -203,6 +185,11 @@ async function doReload(){
         <td class="num">${fmtCost(r.cost_usd)}</td>
         <td><span class="st ${cls}"></span>${r.status||'ERR'}${r.cached?` <span style="color:var(--warn)">[${r.semantic_hit?'sem':'cache'}]</span>`:''}${r.error?` <span class="errmsg" title="${esc(r.error)}">${esc(r.error)}</span>`:''}</td></tr>`;
     }).join('') : '<tr><td colspan="7" class="empty">пока пусто — отправь запрос через Claude Code</td></tr>';
+
+    fetch('/admin/config/yaml', {headers:{'x-api-key': tok}})
+      .then(r => r.ok ? r.text() : '')
+      .then(y => { const ta = $('yamled'); if (y && !ta.dataset.loaded) { ta.value = y; ta.dataset.loaded = '1'; } });
+
   } catch(e) {
     if (e.message === 'unauthorized'){ $('gate').classList.remove('hidden'); $('content').classList.add('hidden'); }
   }
@@ -212,7 +199,7 @@ load();
 setInterval(load, 5000);
 
 async function updBudget(name, i){
-  const v = parseFloat(document.getElementById('nb'+i).value);
+  const v = parseFloat($('nb'+i).value);
   if (isNaN(v)) return;
   await fetch('/admin/tokens/update', {
     method:'POST',
@@ -224,7 +211,34 @@ async function updBudget(name, i){
 
 async function doReload(){
   const r = await fetch('/admin/reload', {method:'POST', headers:{'x-api-key': tok}});
-  if (r.ok) load();
+  if (r.ok) { $('yamlmsg').textContent=''; load(); }
+}
+
+async function saveYaml(){
+  const msg = $('yamlmsg');
+  try {
+    const r = await fetch('/admin/config/yaml', {
+      method:'POST',
+      headers:{'x-api-key': tok, 'Content-Type':'application/json'},
+      body: JSON.stringify({content: $('yamled').value})
+    });
+    const j = await r.json();
+    if (r.ok && j.saved) { msg.textContent = 'сохранено и применено ✓'; msg.style.color='var(--ok)'; load(); }
+    else { msg.textContent = 'ошибка: ' + ((j.error&&j.error.message) || r.status); msg.style.color='var(--err)'; }
+  } catch(e) { msg.textContent = String(e); msg.style.color='var(--err)'; }
+}
+
+async function rollbackYaml(){
+  const msg = $('yamlmsg');
+  const r = await fetch('/admin/config/rollback', {method:'POST', headers:{'x-api-key': tok}});
+  if (r.ok) {
+    const y = await fetch('/admin/config/yaml', {headers:{'x-api-key': tok}}).then(x=>x.text());
+    $('yamled').value = y;
+    msg.textContent = 'откат применён ✓'; msg.style.color='var(--ok)';
+    load();
+  } else {
+    msg.textContent = 'нет бэкапа'; msg.style.color='var(--err)';
+  }
 }
 </script>
 </body>

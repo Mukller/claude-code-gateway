@@ -16,23 +16,28 @@ import (
 	"claude-code-gateway/internal/pricing"
 	"claude-code-gateway/internal/provider"
 	"claude-code-gateway/internal/ratelimit"
+	"claude-code-gateway/internal/state"
 )
 
 var Version = "dev"
 
 type Server struct {
-	cfg        *config.Config
-	reg        *provider.Registry
-	store      *logstore.Store
-	prices     atomic.Pointer[pricing.Table]
-	limiter    *ratelimit.Limiter
-	cache      *cache.Cache
-	fuzzy      *cache.SemanticIndex
-	embedder   *Embedder
-	hooks      []webhookTarget
-	budgets    *budgets
-	rails      *guardrails
-	mcp        *mcp.Handler
+	cfg      *config.Config
+	reg      *provider.Registry
+	store    *logstore.Store
+	prices   atomic.Pointer[pricing.Table]
+	limiter  *ratelimit.Limiter
+	cache    *cache.Cache
+	fuzzy    *cache.SemanticIndex
+	embedder *Embedder
+	hooks    []webhookTarget
+	budgets  *budgets
+	rails    *guardrails
+	mcp      *mcp.Handler
+
+	storeBackend state.Store
+	cacheTTL     time.Duration
+
 	started    time.Time
 	tokens     map[string]bool
 	ConfigPath string
@@ -69,6 +74,8 @@ func New(cfg *config.Config, reg *provider.Registry, store *logstore.Store, pric
 	}
 	s.budgets = newBudgets(cfg.Clients)
 	s.mcp = s.buildMCP()
+	s.cacheTTL = cfg.Cache.TTL
+	s.initStateStore()
 	return s
 }
 
@@ -94,6 +101,8 @@ func (s *Server) Handler() http.Handler {
 	mux.HandleFunc("/admin/keys", s.requireAuth(s.handleAdminKeys))
 	mux.HandleFunc("/admin/export.csv", s.requireAuth(s.handleExportCSV))
 	mux.HandleFunc("/admin/reload", s.requireAuth(s.handleAdminReload))
+	mux.HandleFunc("/admin/config/yaml", s.requireAuth(s.handleConfigYaml))
+	mux.HandleFunc("/admin/config/rollback", s.requireAuth(s.handleConfigRollback))
 	return s.withRecovery(s.withAccessLog(mux))
 }
 

@@ -228,7 +228,8 @@ func (s *Server) handleMessages(w http.ResponseWriter, r *http.Request) {
 			fmt.Sprintf("model %q is not allowed for this client", mreq.Model))
 		return
 	}
-	if !s.budgets.allowTPM(token, est, time.Now()) {
+	ci, _, _ := s.budgets.exceeded(token, time.Now())
+	if !s.limiter.AllowTokens(token, est, ci.TPM, time.Now()) {
 		writeAnthropicError(w, http.StatusTooManyRequests, "rate_limit_error",
 			fmt.Sprintf("tokens-per-minute limit exceeded (est %d tokens)", est))
 		return
@@ -267,7 +268,7 @@ func (s *Server) handleMessages(w http.ResponseWriter, r *http.Request) {
 					}
 				}
 				if semKey != "" {
-					if e, found := s.cache.Get(semKey); found {
+					if e, found := s.cacheGet(semKey); found {
 						writeJSONMessage(w, e.Body)
 						s.logRecord(logstore.Record{
 							Time: time.Now(), Token: s.tokenLabel(token), Model: mreq.Model,
@@ -281,7 +282,7 @@ func (s *Server) handleMessages(w http.ResponseWriter, r *http.Request) {
 				}
 			}
 			ck = cache.Key(p.Name(), tg.Model, payload)
-			if e, found := s.cache.Get(ck); found {
+			if e, found := s.cacheGet(ck); found {
 				writeJSONMessage(w, e.Body)
 				s.logRecord(logstore.Record{
 					Time: time.Now(), Token: s.tokenLabel(token), Model: mreq.Model,
@@ -464,10 +465,12 @@ func (s *Server) handleMessages(w http.ResponseWriter, r *http.Request) {
 			s.logRecord(rec)
 
 			if ck != "" && len(respBytes) > 0 {
-				s.cache.Put(ck, cache.Entry{Body: respBytes, In: rec.InTok, Out: rec.OutTok})
+				s.cachePutAll(ck, cache.Entry{Body: respBytes, In: rec.InTok, Out: rec.OutTok})
 			}
-			if semKey != "" && semVec != nil && len(respBytes) > 0 {
-				s.cache.Put(semKey, cache.Entry{Body: respBytes, In: rec.InTok, Out: rec.OutTok})
+			// semantic entry stored under its own key via cachePutAll above when key equals ck;
+			// here we additionally mirror under semKey for future similar-prompt hits
+			if semKey != "" && semVec != nil && len(respBytes) > 0 && semKey != ck {
+				s.cachePutAll(semKey, cache.Entry{Body: respBytes, In: rec.InTok, Out: rec.OutTok})
 				s.fuzzy.Add(semKey, semVec)
 			}
 			return

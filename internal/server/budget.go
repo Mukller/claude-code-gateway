@@ -1,6 +1,8 @@
 package server
 
 import (
+	"crypto/sha256"
+	"encoding/hex"
 	"encoding/json"
 	"fmt"
 	"net/http"
@@ -11,6 +13,7 @@ import (
 	"time"
 
 	"claude-code-gateway/internal/config"
+	"claude-code-gateway/internal/state"
 )
 
 type clientInfo struct {
@@ -33,6 +36,28 @@ type budgets struct {
 	info           map[string]clientInfo
 	states         map[string]*budgetState
 	runtimeChanged bool
+	store          state.Store
+	prefix         string
+}
+
+func (b *budgets) SetStore(s state.Store, prefix string) {
+	b.mu.Lock()
+	defer b.mu.Unlock()
+	b.store = s
+	b.prefix = prefix
+}
+
+func (b *budgets) budgetKey(token string, now time.Time) string {
+	sum := sha256.Sum256([]byte(token))
+	short := hex.EncodeToString(sum[:4])
+	return "budget:" + short + ":" + periodKeyNow(periodOf(b, token), now)
+}
+
+func periodOf(b *budgets, token string) string {
+	if ci, ok := b.info[token]; ok {
+		return ci.Period
+	}
+	return ""
 }
 
 func (b *budgets) statesMu(fn func(m map[string]*budgetState)) {
@@ -83,30 +108,6 @@ func (b *budgets) allowsModel(token, model string) bool {
 	return matchAnyPattern(ci.AllowedModels, model)
 }
 
-func (b *budgets) allowTPM(token string, est int64, now time.Time) bool {
-	ci, ok := b.lookup(token)
-	if !ok || ci.TPM <= 0 {
-		return true
-	}
-	b.mu.Lock()
-	defer b.mu.Unlock()
-	st := b.states[token]
-	if st == nil {
-		st = &budgetState{periodKey: periodKeyNow(ci.Period, now)}
-		b.states[token] = st
-	}
-	win := now.Unix() / 60
-	if st.tpmWin != win {
-		st.tpmWin = win
-		st.tpmUsed = 0
-	}
-	if st.tpmUsed+est > ci.TPM {
-		return false
-	}
-	st.tpmUsed += est
-	return true
-}
-
 func periodKeyNow(period string, now time.Time) string {
 	switch strings.ToLower(period) {
 	case "daily":
@@ -153,6 +154,11 @@ func (b *budgets) lookup(token string) (clientInfo, bool) {
 }
 
 func (b *budgets) spentFor(token string, ci clientInfo, now time.Time) float64 {
+	if b.store != nil {
+		if v, err := b.store.GetFloat(b.budgetKey(token, now)); err == nil {
+			return v
+		}
+	}
 	st := b.states[token]
 	if st == nil || st.periodKey != periodKeyNow(ci.Period, now) {
 		return 0
@@ -165,8 +171,6 @@ func (b *budgets) exceeded(token string, now time.Time) (clientInfo, float64, bo
 	if !ok || ci.Limit < 0 {
 		return ci, 0, false
 	}
-	b.mu.Lock()
-	defer b.mu.Unlock()
 	spent := b.spentFor(token, ci, now)
 	return ci, spent, spent >= ci.Limit
 }
@@ -175,6 +179,11 @@ func (b *budgets) add(token string, usd float64, now time.Time) {
 	ci, ok := b.lookup(token)
 	if !ok || ci.Limit < 0 || usd <= 0 {
 		return
+	}
+	if b.store != nil {
+		if _, err := b.store.IncrFloat(b.budgetKey(token, now), usd); err == nil {
+			return
+		}
 	}
 	b.mu.Lock()
 	defer b.mu.Unlock()
