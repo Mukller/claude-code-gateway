@@ -2,6 +2,7 @@ package provider
 
 import (
 	"context"
+	"fmt"
 	"log"
 	"strings"
 	"sync"
@@ -35,6 +36,10 @@ type Registry struct {
 	defChain   []string
 	alias      bool
 	discovered map[string][]string
+
+	genMu     sync.Mutex
+	rootCtx   context.Context
+	genCancel context.CancelFunc
 }
 
 func NewRegistry(routing *config.Routing, provCfgs []config.Provider) *Registry {
@@ -44,27 +49,76 @@ func NewRegistry(routing *config.Routing, provCfgs []config.Provider) *Registry 
 		alias:      routing.AliasClaudePrefix,
 		discovered: map[string][]string{},
 	}
+	reg.apply(routing, provCfgs)
+	return reg
+}
+
+func (r *Registry) apply(routing *config.Routing, provCfgs []config.Provider) {
+	provs := map[string]*Provider{}
+	var order []string
 	for _, pc := range provCfgs {
 		p := New(pc)
-		reg.providers[p.Name()] = p
-		reg.order = append(reg.order, p.Name())
+		provs[p.Name()] = p
+		order = append(order, p.Name())
 	}
+	var rules []compiledRule
 	for _, rc := range routing.Rules {
-		reg.rules = append(reg.rules, compiledRule{
+		rules = append(rules, compiledRule{
 			prefix: rc.Prefix,
 			strip:  rc.StripPrefix,
 			chain:  rc.Chain,
 			mmap:   rc.ModelMap,
 		})
 	}
-	for i := 0; i < len(reg.rules); i++ {
-		for j := i + 1; j < len(reg.rules); j++ {
-			if len(reg.rules[j].prefix) > len(reg.rules[i].prefix) {
-				reg.rules[i], reg.rules[j] = reg.rules[j], reg.rules[i]
+	for i := 0; i < len(rules); i++ {
+		for j := i + 1; j < len(rules); j++ {
+			if len(rules[j].prefix) > len(rules[i].prefix) {
+				rules[i], rules[j] = rules[j], rules[i]
 			}
 		}
 	}
-	return reg
+	r.providers = provs
+	r.order = order
+	r.rules = rules
+	r.defChain = routing.DefaultChain
+	r.alias = routing.AliasClaudePrefix
+	r.discovered = map[string][]string{}
+}
+
+func hasUsableProvider(provCfgs []config.Provider) bool {
+	for _, pc := range provCfgs {
+		n := 0
+		for _, k := range pc.Keys {
+			if k != "" {
+				n++
+			}
+		}
+		if n > 0 || (pc.Type == "vertex" && pc.AuthStyle == "sa") {
+			return true
+		}
+	}
+	return false
+}
+
+func (r *Registry) Swap(routing *config.Routing, provCfgs []config.Provider) error {
+	if !hasUsableProvider(provCfgs) {
+		return fmt.Errorf("reload rejected: no provider with keys")
+	}
+	r.genMu.Lock()
+	defer r.genMu.Unlock()
+	if r.genCancel != nil {
+		r.genCancel()
+		r.genCancel = nil
+	}
+	r.mu.Lock()
+	r.apply(routing, provCfgs)
+	r.mu.Unlock()
+	if r.rootCtx != nil {
+		genCtx, cancel := context.WithCancel(r.rootCtx)
+		r.genCancel = cancel
+		go r.runDiscovery(genCtx)
+	}
+	return nil
 }
 
 func (r *Registry) Provider(name string) *Provider {
@@ -123,6 +177,15 @@ func (r *Registry) matchRulesLocked(model string) ([]Target, string, bool) {
 }
 
 func (r *Registry) StartDiscovery(ctx context.Context) {
+	r.genMu.Lock()
+	defer r.genMu.Unlock()
+	r.rootCtx = ctx
+	genCtx, cancel := context.WithCancel(ctx)
+	r.genCancel = cancel
+	go r.runDiscovery(genCtx)
+}
+
+func (r *Registry) runDiscovery(ctx context.Context) {
 	for _, p := range r.Providers() {
 		if !p.DiscoversModels() {
 			continue

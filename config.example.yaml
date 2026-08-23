@@ -17,6 +17,14 @@ cache:
   ttl: 10m
   max_entries: 128
 
+# Вебхуки: POST JSON на каждое событие usage/error
+# X-CCG-Signature: sha256=hex(hmac_sha256(secret, body))
+webhooks: []
+#  - url: "https://hooks.example.com/ccg"
+#    secret: "${WEBHOOK_SECRET}"
+#    events: [usage, error]
+#    timeout: 5s
+
 logging:
   file: "data/usage.jsonl"
   ring_size: 500

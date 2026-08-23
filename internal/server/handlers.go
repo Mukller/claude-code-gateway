@@ -111,9 +111,10 @@ func isSSEContentType(h string) bool {
 }
 
 func (s *Server) costFor(model string, in, out, cr, cw int64) float64 {
-	p, ok := s.prices.Match(model)
+	table := s.priceTable()
+	p, ok := table.Match(model)
 	if !ok {
-		p2, ok2 := s.prices.Match("default")
+		p2, ok2 := table.Match("default")
 		if !ok2 {
 			return 0
 		}
@@ -191,7 +192,7 @@ func (s *Server) handleMessages(w http.ResponseWriter, r *http.Request) {
 			ck = cache.Key(p.Name(), tg.Model, payload)
 			if e, found := s.cache.Get(ck); found {
 				writeJSONMessage(w, e.Body)
-				s.store.Add(logstore.Record{
+				s.logRecord(logstore.Record{
 					Time: time.Now(), Token: maskToken(token), Model: mreq.Model,
 					TargetModel: tg.Model, Provider: p.Name(), Status: http.StatusOK,
 					Cached: true, InTok: e.In, OutTok: e.Out,
@@ -227,7 +228,7 @@ func (s *Server) handleMessages(w http.ResponseWriter, r *http.Request) {
 			if uerr != nil {
 				p.Pool().Report(key, provider.SoftFail)
 				rec.Error = core.TrimString(uerr.Error(), 400)
-				s.store.Add(rec)
+				s.logRecord(rec)
 				lastProv, lastMsg, lastStatus = p.Name(), rec.Error, 0
 				continue
 			}
@@ -244,7 +245,7 @@ func (s *Server) handleMessages(w http.ResponseWriter, r *http.Request) {
 				}
 				rec.Status = resp.Status
 				rec.Error = core.TrimString(FirstNonEmptyStr(resp.ErrMsg, string(data)), 400)
-				s.store.Add(rec)
+				s.logRecord(rec)
 				lastProv, lastMsg, lastStatus = p.Name(), rec.Error, resp.Status
 				if !kind.retryable() {
 					passThroughUpstreamError(w, resp.Status, data)
@@ -342,7 +343,7 @@ func (s *Server) handleMessages(w http.ResponseWriter, r *http.Request) {
 			rec.LatencyMs = time.Since(started).Milliseconds()
 			if serr != nil {
 				rec.Error = core.TrimString(serr.Error(), 300)
-				s.store.Add(rec)
+				s.logRecord(rec)
 				lastProv, lastMsg, lastStatus = p.Name(), rec.Error, resp.Status
 				continue
 			}
@@ -355,7 +356,7 @@ func (s *Server) handleMessages(w http.ResponseWriter, r *http.Request) {
 				rec.InTok = core.EstimateRequestTokens(&mreq)
 			}
 			rec.CostUSD = s.costFor(tg.Model, rec.InTok, rec.OutTok, rec.CacheRead, rec.CacheWrite)
-			s.store.Add(rec)
+			s.logRecord(rec)
 
 			if ck != "" && len(respBytes) > 0 {
 				s.cache.Put(ck, cache.Entry{Body: respBytes, In: rec.InTok, Out: rec.OutTok})
@@ -375,7 +376,7 @@ func (s *Server) handleMessages(w http.ResponseWriter, r *http.Request) {
 		status = http.StatusServiceUnavailable
 	}
 	writeAnthropicError(w, status, "overloaded_error", msg)
-	s.store.Add(logstore.Record{
+	s.logRecord(logstore.Record{
 		Time: time.Now(), Token: maskToken(token), Model: mreq.Model,
 		Status: status, Error: core.TrimString(msg, 400),
 	})

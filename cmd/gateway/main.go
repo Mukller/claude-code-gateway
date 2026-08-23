@@ -20,12 +20,19 @@ import (
 	"claude-code-gateway/internal/server"
 )
 
+var version = "dev"
+
 func main() {
 	log.SetFlags(log.LstdFlags | log.Lmicroseconds)
 	cfgPath := flag.String("config", "config.yaml", "path to config file")
 	launch := flag.Bool("launch", false, "start gateway and spawn `claude` with env injected")
 	healthcheck := flag.Bool("healthcheck", false, "probe /healthz and exit with 0/1")
+	showVersion := flag.Bool("version", false, "print version and exit")
 	flag.Parse()
+	if *showVersion {
+		fmt.Println("cc-gateway", version)
+		return
+	}
 	if envPath := os.Getenv("GATEWAY_CONFIG"); envPath != "" {
 		cfgPath = &envPath
 	}
@@ -69,6 +76,7 @@ func main() {
 	reg.StartDiscovery(ctx)
 
 	srv := server.New(cfg, reg, store, prices)
+	srv.ConfigPath = *cfgPath
 	httpSrv := &http.Server{
 		Addr:              cfg.Server.Listen,
 		Handler:           srv.Handler(),

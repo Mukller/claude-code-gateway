@@ -19,6 +19,14 @@ type Config struct {
 	Logging   Logging     `yaml:"logging"`
 	RateLimit int         `yaml:"rate_limit_rpm"`
 	Cache     Cache       `yaml:"cache"`
+	Webhooks  []Webhook   `yaml:"webhooks"`
+}
+
+type Webhook struct {
+	URL     string        `yaml:"url"`
+	Secret  string        `yaml:"secret"`
+	Events  []string      `yaml:"events"`
+	Timeout time.Duration `yaml:"timeout"`
 }
 
 type Cache struct {
@@ -166,6 +174,11 @@ func (c *Config) applyDefaults() {
 	if c.Cache.MaxEntries <= 0 {
 		c.Cache.MaxEntries = 128
 	}
+	for i := range c.Webhooks {
+		if c.Webhooks[i].Timeout <= 0 {
+			c.Webhooks[i].Timeout = 5 * time.Second
+		}
+	}
 	if len(c.Providers) > 0 && len(c.Routing.DefaultChain) == 0 {
 		c.Routing.DefaultChain = []string{c.Providers[0].Name}
 	}
@@ -232,6 +245,11 @@ func (c *Config) validate() error {
 	for i, r := range c.Routing.Rules {
 		if err := checkChains(r.Chain, fmt.Sprintf("rules[%d]", i)); err != nil {
 			return err
+		}
+	}
+	for i, w := range c.Webhooks {
+		if w.URL == "" {
+			return fmt.Errorf("webhooks[%d]: url required", i)
 		}
 	}
 	return nil

@@ -67,6 +67,11 @@ h2{font-size:14px;margin-bottom:10px;color:var(--dim);font-weight:600;text-trans
 <div class="bars" id="chart"></div>
 </td></tr></table>
 
+<h2>По дням (14 дней, UTC)</h2>
+<table><tr><td style="padding:10px 12px 14px">
+<div class="bars" id="chartDays"></div>
+</td></tr></table>
+
 <h2>По провайдерам</h2>
 <table><thead><tr><th>Провайдер</th><th class="num">Запросы</th><th class="num">Ошибки</th><th class="num">In</th><th class="num">Out</th><th class="num">Cost</th></tr></thead><tbody id="byprov"></tbody></table>
 
@@ -134,6 +139,18 @@ async function load(){
       const h = Math.max(2, Math.round(b.req/maxReq*84));
       const lbl = i%4===3 ? b.key.slice(11)+'ч' : '';
       return `<div class="bar" style="height:${h}px" title="${b.key}: ${b.req} запр., ${fmtCost(b.cost)}">${lbl?`<span class="barlbl">${lbl}</span>`:''}</div>`;
+    }).join('');
+
+    const byDayMap = stats.by_day || {};
+    const dayKeys = Object.keys(byDayMap).sort().slice(-14);
+    const todayKey = nowH.toISOString().slice(0,10);
+    if (!dayKeys.includes(todayKey)) dayKeys.push(todayKey);
+    const maxDayReq = Math.max(1, ...dayKeys.map(k=>byDayMap[k]?.requests||0));
+    $('chartDays').innerHTML = dayKeys.map((k,i) => {
+      const s = byDayMap[k] || {requests:0, cost_usd:0};
+      const h = Math.max(2, Math.round(s.requests/maxDayReq*84));
+      const lbl = i===dayKeys.length-1 ? k.slice(8)+'.'+k.slice(5,7) : '';
+      return `<div class="bar" style="height:${h}px" title="${k}: ${s.requests} запр., ${fmtCost(s.cost_usd)}">${lbl?`<span class="barlbl">${lbl}</span>`:''}</div>`;
     }).join('');
 
     const provs = Object.entries(stats.by_provider||{}).sort((a,b)=>b[1].cost_usd-a[1].cost_usd);

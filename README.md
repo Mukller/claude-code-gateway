@@ -30,8 +30,10 @@
 - **Логи и стоимость**: каждая запись — токены, latency, статус, оценка стоимости в USD; JSONL-файл + агрегаты
 - **Кэш ответов (opt-in)**: одинаковые non-stream запросы отдаются из LRU+TTL кэша
   (`cache.enabled: true`) — для реплеев и оценок; в логе такие записи помечены `"cached":true`
-- **Rate limit**, admin-API (`/admin/stats`, `/admin/logs`), healthcheck (`/healthz` +
-  флаг `-healthcheck` для docker/compose)
+- **Rate limit**, admin-API (`/admin/stats`, `/admin/logs`, `POST /admin/reload` — горячая
+  перезагрузка провайдеров/роутинга/прайсинга без рестарта), `/metrics` в формате Prometheus,
+  healthcheck (`/healthz` + флаг `-healthcheck` для docker/compose)
+- **Вебхуки**: push событий `usage`/`error` на твой URL с HMAC-подписью (`X-CCG-Signature`)
 - **Лаунчер**: `gateway -launch -- "твои флаги claude"` — поднимает гейтвей и стартует Claude Code
   с уже прописанными env
 
@@ -116,8 +118,30 @@ pricing:                           # USD за 1M токенов; pattern = glob
 
 Дашборд: **http://localhost:8090/admin/dashboard** — введи `GATEWAY_TOKEN` или
 `GATEWAY_ADMIN_TOKEN` (сохраняется в localStorage, автообновление 5с). Внутри:
-карточки за сегодня, график запросов за 24ч (UTC), таблицы по провайдерам/моделям,
+карточки за сегодня, графики за 24ч и 14 дней (UTC), таблицы по провайдерам/моделям,
 лента последних запросов.
+
+Горячая перезагрузка (меняешь `config.yaml` — провайдеры/ключи/роутинг/цены применяются без рестарта):
+
+```bash
+curl -X POST -H "x-api-key: ccg-admin-token" http://localhost:8090/admin/reload
+```
+
+Метрики для Prometheus (токен можно передать заголовком или `?token=`):
+
+```bash
+curl -H "x-api-key: ccg-admin-token" http://localhost:8090/metrics
+```
+
+Вебхуки:
+
+```yaml
+webhooks:
+  - url: "https://hooks.example.com/ccg"
+    secret: "${WEBHOOK_SECRET}"     # X-CCG-Signature: sha256=hex(hmac(secret, body))
+    events: [usage, error]          # пусто = все
+    timeout: 5s
+```
 
 ```bash
 curl http://localhost:8090/healthz
@@ -165,6 +189,5 @@ internal/config         YAML + ${ENV}
 
 ## Roadmap
 
-- Графики стоимости по дням в дашборде
+- Дедупликация вебхуков (retry с backoff)
 - Кэширование стримовых ответов (идемпотентность спорна — пока не делаем)
-- Webhook'и на события usage

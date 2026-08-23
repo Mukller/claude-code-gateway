@@ -6,6 +6,7 @@ import (
 	"net/http"
 	"runtime/debug"
 	"strings"
+	"sync/atomic"
 	"time"
 
 	"claude-code-gateway/internal/cache"
@@ -17,14 +18,16 @@ import (
 )
 
 type Server struct {
-	cfg     *config.Config
-	reg     *provider.Registry
-	store   *logstore.Store
-	prices  pricing.Table
-	limiter *ratelimit.Limiter
-	cache   *cache.Cache
-	started time.Time
-	tokens  map[string]bool
+	cfg        *config.Config
+	reg        *provider.Registry
+	store      *logstore.Store
+	prices     atomic.Pointer[pricing.Table]
+	limiter    *ratelimit.Limiter
+	cache      *cache.Cache
+	hooks      []webhookTarget
+	started    time.Time
+	tokens     map[string]bool
+	ConfigPath string
 }
 
 func New(cfg *config.Config, reg *provider.Registry, store *logstore.Store, prices pricing.Table) *Server {
@@ -32,20 +35,25 @@ func New(cfg *config.Config, reg *provider.Registry, store *logstore.Store, pric
 		cfg:     cfg,
 		reg:     reg,
 		store:   store,
-		prices:  prices,
 		limiter: ratelimit.New(cfg.RateLimit),
 		started: time.Now(),
 		tokens:  map[string]bool{},
 	}
+	s.prices.Store(&prices)
 	if cfg.Cache.Enabled {
 		s.cache = cache.New(cfg.Cache.TTL, cfg.Cache.MaxEntries)
 	}
+	s.hooks = buildWebhookTargets(cfg.Webhooks)
 	for _, t := range cfg.Auth.Tokens {
 		if t != "" {
 			s.tokens[t] = true
 		}
 	}
 	return s
+}
+
+func (s *Server) priceTable() pricing.Table {
+	return *s.prices.Load()
 }
 
 func (s *Server) Handler() http.Handler {
@@ -55,9 +63,11 @@ func (s *Server) Handler() http.Handler {
 	mux.HandleFunc("/v1/messages/count_tokens", s.handleCountTokens)
 	mux.HandleFunc("/v1/models", s.handleModels)
 	mux.HandleFunc("/healthz", s.handleHealth)
+	mux.HandleFunc("/metrics", s.requireAuth(s.handleMetrics))
 	mux.HandleFunc("/admin/dashboard", s.handleDashboard)
 	mux.HandleFunc("/admin/stats", s.requireAuth(s.handleAdminStats))
 	mux.HandleFunc("/admin/logs", s.requireAuth(s.handleAdminLogs))
+	mux.HandleFunc("/admin/reload", s.requireAuth(s.handleAdminReload))
 	return s.withRecovery(s.withAccessLog(mux))
 }
 
@@ -138,6 +148,9 @@ func extractToken(r *http.Request) string {
 
 func (s *Server) checkAuth(r *http.Request) (string, bool) {
 	token := extractToken(r)
+	if token == "" {
+		token = r.URL.Query().Get("token")
+	}
 	if token == "" && s.cfg.Auth.AllowAnon {
 		return "anon", true
 	}
