@@ -1,6 +1,7 @@
 package server
 
 import (
+	"encoding/json"
 	"fmt"
 	"net/http"
 	"path"
@@ -28,9 +29,16 @@ type budgetState struct {
 }
 
 type budgets struct {
-	mu     sync.Mutex
-	info   map[string]clientInfo
-	states map[string]*budgetState
+	mu             sync.Mutex
+	info           map[string]clientInfo
+	states         map[string]*budgetState
+	runtimeChanged bool
+}
+
+func (b *budgets) statesMu(fn func(m map[string]*budgetState)) {
+	b.mu.Lock()
+	defer b.mu.Unlock()
+	fn(b.states)
 }
 
 func newBudgets(clients []config.Client) *budgets {
@@ -42,8 +50,12 @@ func newBudgets(clients []config.Client) *budgets {
 		if c.Token == "" {
 			continue
 		}
+		limit := c.BudgetUSD
+		if limit <= 0 {
+			limit = -1
+		}
 		b.info[c.Token] = clientInfo{
-			Name: c.Name, Limit: c.BudgetUSD, Period: c.BudgetPeriod,
+			Name: c.Name, Limit: limit, Period: c.BudgetPeriod,
 			AllowedModels: c.AllowedModels, TPM: c.TPM,
 		}
 	}
@@ -150,7 +162,7 @@ func (b *budgets) spentFor(token string, ci clientInfo, now time.Time) float64 {
 
 func (b *budgets) exceeded(token string, now time.Time) (clientInfo, float64, bool) {
 	ci, ok := b.lookup(token)
-	if !ok || ci.Limit <= 0 {
+	if !ok || ci.Limit < 0 {
 		return ci, 0, false
 	}
 	b.mu.Lock()
@@ -161,7 +173,7 @@ func (b *budgets) exceeded(token string, now time.Time) (clientInfo, float64, bo
 
 func (b *budgets) add(token string, usd float64, now time.Time) {
 	ci, ok := b.lookup(token)
-	if !ok || ci.Limit <= 0 || usd <= 0 {
+	if !ok || ci.Limit < 0 || usd <= 0 {
 		return
 	}
 	b.mu.Lock()
@@ -198,7 +210,7 @@ func (s *Server) tokenReports(now time.Time) []tokenReport {
 			BudgetUSD: ci.Limit, SpentUSD: round4(spent),
 			Period: ci.Period,
 		}
-		if ci.Limit > 0 {
+		if ci.Limit >= 0 {
 			tr.RemainingUSD = round4(ci.Limit - spent)
 			tr.ResetsAt = nextReset(ci.Period, now)
 		} else {
@@ -232,4 +244,51 @@ func (s *Server) tokenLabel(token string) string {
 
 func (s *Server) handleAdminTokens(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusOK, map[string]any{"tokens": s.tokenReports(time.Now())})
+}
+
+func (b *budgets) updateLimitByName(name string, limit float64) bool {
+	b.mu.Lock()
+	defer b.mu.Unlock()
+	for tok, ci := range b.info {
+		if strings.EqualFold(ci.Name, name) {
+			ci.Limit = limit
+			b.info[tok] = ci
+			return true
+		}
+	}
+	return false
+}
+
+type updateBudgetReq struct {
+	Name      string  `json:"name"`
+	BudgetUSD float64 `json:"budget_usd"`
+}
+
+func (s *Server) handleAdminTokensUpdate(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodPost {
+		writeAnthropicError(w, http.StatusMethodNotAllowed, "invalid_request_error", "use POST")
+		return
+	}
+	var req updateBudgetReq
+	if err := json.NewDecoder(http.MaxBytesReader(w, r.Body, 1<<20)).Decode(&req); err != nil || req.Name == "" {
+		writeAnthropicError(w, http.StatusBadRequest, "invalid_request_error", "body: {\"name\":..., \"budget_usd\":...}")
+		return
+	}
+	if !s.budgets.updateLimitByName(req.Name, req.BudgetUSD) {
+		writeAnthropicError(w, http.StatusNotFound, "not_found_error", "client not found: "+req.Name)
+		return
+	}
+	s.budgets.statesMu(func(m map[string]*budgetState) {
+		for tok := range m {
+			if s.budgets.info[tok].Name == req.Name {
+				delete(m, tok)
+			}
+		}
+	})
+	s.budgets.runtimeChanged = true
+	writeJSON(w, http.StatusOK, map[string]any{
+		"updated":    req.Name,
+		"budget_usd": req.BudgetUSD,
+		"note":       "runtime-only until config reload/restart",
+	})
 }

@@ -83,3 +83,82 @@ func (c *Cache) Len() int {
 	defer c.mu.Unlock()
 	return len(c.m)
 }
+
+type semEntry struct {
+	vec []float32
+	key string
+	at  time.Time
+}
+
+type SemanticIndex struct {
+	mu        sync.Mutex
+	threshold float64
+	max       int
+	entries   []semEntry
+}
+
+func NewSemantic(threshold float64, max int) *SemanticIndex {
+	if threshold <= 0 {
+		threshold = 0.93
+	}
+	if max <= 0 {
+		max = 1000
+	}
+	return &SemanticIndex{threshold: threshold, max: max}
+}
+
+func Cosine(a, b []float32) float64 {
+	var dot, na, nb float64
+	for i := range a {
+		dot += float64(a[i]) * float64(b[i])
+		na += float64(a[i]) * float64(a[i])
+		nb += float64(b[i]) * float64(b[i])
+	}
+	if na == 0 || nb == 0 {
+		return 0
+	}
+	return dot / (sqrtF(na) * sqrtF(nb))
+}
+
+func sqrtF(x float64) float64 {
+	if x <= 0 {
+		return 0
+	}
+	g := x
+	for i := 0; i < 24; i++ {
+		g = (g + x/g) / 2
+	}
+	return g
+}
+
+func (s *SemanticIndex) Add(key string, vec []float32) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	s.entries = append(s.entries, semEntry{vec: vec, key: key, at: time.Now()})
+	if len(s.entries) > s.max {
+		s.entries = s.entries[len(s.entries)-s.max:]
+	}
+}
+
+func (s *SemanticIndex) Search(vec []float32) (key string, sim float64, ok bool) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	best := -1.0
+	var bestKey string
+	for _, e := range s.entries {
+		if c := Cosine(vec, e.vec); c > best {
+			best = c
+			bestKey = e.key
+		}
+	}
+	if best >= s.threshold && bestKey != "" {
+		return bestKey, best, true
+	}
+	return "", 0, false
+}
+
+func (s *SemanticIndex) Len() int {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	return len(s.entries)
+}

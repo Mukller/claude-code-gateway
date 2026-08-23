@@ -10,17 +10,18 @@ import (
 )
 
 type Config struct {
-	Server    Server      `yaml:"server"`
-	Auth      Auth        `yaml:"auth"`
-	Providers []Provider  `yaml:"providers"`
-	Routing   Routing     `yaml:"routing"`
-	Retry     Retry       `yaml:"retry"`
-	Pricing   []PriceRule `yaml:"pricing"`
-	Logging   Logging     `yaml:"logging"`
-	RateLimit int         `yaml:"rate_limit_rpm"`
-	Cache     Cache       `yaml:"cache"`
-	Webhooks  []Webhook   `yaml:"webhooks"`
-	Clients   []Client    `yaml:"clients"`
+	Server     Server      `yaml:"server"`
+	Auth       Auth        `yaml:"auth"`
+	Providers  []Provider  `yaml:"providers"`
+	Routing    Routing     `yaml:"routing"`
+	Retry      Retry       `yaml:"retry"`
+	Pricing    []PriceRule `yaml:"pricing"`
+	Logging    Logging     `yaml:"logging"`
+	RateLimit  int         `yaml:"rate_limit_rpm"`
+	Cache      Cache       `yaml:"cache"`
+	Webhooks   []Webhook   `yaml:"webhooks"`
+	Clients    []Client    `yaml:"clients"`
+	Guardrails Guardrails  `yaml:"guardrails"`
 }
 
 type Client struct {
@@ -43,6 +44,30 @@ type Cache struct {
 	Enabled    bool          `yaml:"enabled"`
 	TTL        time.Duration `yaml:"ttl"`
 	MaxEntries int           `yaml:"max_entries"`
+	Semantic   SemanticCache `yaml:"semantic"`
+}
+
+type SemanticCache struct {
+	Enabled   bool    `yaml:"enabled"`
+	Threshold float64 `yaml:"threshold"`
+	Endpoint  string  `yaml:"endpoint"`
+	Model     string  `yaml:"model"`
+	Key       string  `yaml:"key"`
+}
+
+type Guardrails struct {
+	Request  ReqGuardrails  `yaml:"request"`
+	Response RespGuardrails `yaml:"response"`
+}
+
+type ReqGuardrails struct {
+	MaxInputTokens  int64    `yaml:"max_input_tokens"`
+	BlockedPatterns []string `yaml:"blocked_patterns"`
+	DeniedTools     []string `yaml:"denied_tools"`
+}
+
+type RespGuardrails struct {
+	BlockedPatterns []string `yaml:"blocked_patterns"`
 }
 
 type Server struct {

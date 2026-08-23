@@ -198,6 +198,30 @@ func TranslateRequest(m *MessagesRequest, targetModel string) (*ChatRequest, err
 	return out, nil
 }
 
+func RequestFlatText(m *MessagesRequest) string {
+	var sb strings.Builder
+	sb.WriteString("SYSTEM: ")
+	sb.WriteString(SystemText(m.System))
+	for _, am := range m.Messages {
+		bs, _ := BlocksFromRaw(am.Content)
+		for _, b := range bs {
+			switch b.Type {
+			case "text":
+				sb.WriteString(b.Text)
+			case "tool_result":
+				sb.WriteString(FlattenContent(b.Content))
+			case "tool_use":
+				sb.WriteString(b.Name)
+				sb.Write(b.Input)
+			case "image":
+				sb.WriteString("[image]")
+			}
+			sb.WriteString("\n")
+		}
+	}
+	return sb.String()
+}
+
 func RequestTraits(m *MessagesRequest) (estTokens int64, hasImage, thinking bool) {
 	estTokens = EstimateRequestTokens(m)
 	for _, am := range m.Messages {

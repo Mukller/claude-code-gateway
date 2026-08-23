@@ -27,8 +27,11 @@ type Server struct {
 	prices     atomic.Pointer[pricing.Table]
 	limiter    *ratelimit.Limiter
 	cache      *cache.Cache
+	fuzzy      *cache.SemanticIndex
+	embedder   *Embedder
 	hooks      []webhookTarget
 	budgets    *budgets
+	rails      *guardrails
 	mcp        *mcp.Handler
 	started    time.Time
 	tokens     map[string]bool
@@ -47,8 +50,13 @@ func New(cfg *config.Config, reg *provider.Registry, store *logstore.Store, pric
 	s.prices.Store(&prices)
 	if cfg.Cache.Enabled {
 		s.cache = cache.New(cfg.Cache.TTL, cfg.Cache.MaxEntries)
+		if cfg.Cache.Semantic.Enabled && cfg.Cache.Semantic.Endpoint != "" {
+			s.fuzzy = cache.NewSemantic(cfg.Cache.Semantic.Threshold, cfg.Cache.MaxEntries)
+			s.embedder = newEmbedder(cfg.Cache.Semantic)
+		}
 	}
 	s.hooks = buildWebhookTargets(cfg.Webhooks)
+	s.rails = compileGuardrails(cfg.Guardrails)
 	for _, t := range cfg.Auth.Tokens {
 		if t != "" {
 			s.tokens[t] = true
@@ -81,6 +89,8 @@ func (s *Server) Handler() http.Handler {
 	mux.HandleFunc("/admin/stats", s.requireAuth(s.handleAdminStats))
 	mux.HandleFunc("/admin/logs", s.requireAuth(s.handleAdminLogs))
 	mux.HandleFunc("/admin/tokens", s.requireAuth(s.handleAdminTokens))
+	mux.HandleFunc("/admin/tokens/update", s.requireAuth(s.handleAdminTokensUpdate))
+	mux.HandleFunc("/admin/config", s.requireAuth(s.handleAdminConfig))
 	mux.HandleFunc("/admin/keys", s.requireAuth(s.handleAdminKeys))
 	mux.HandleFunc("/admin/export.csv", s.requireAuth(s.handleExportCSV))
 	mux.HandleFunc("/admin/reload", s.requireAuth(s.handleAdminReload))

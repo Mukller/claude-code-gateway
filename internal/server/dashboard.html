@@ -44,6 +44,7 @@ h2{font-size:14px;margin-bottom:10px;color:var(--dim);font-weight:600;text-trans
 <div id="tokpanel">
   <input id="tok" type="password" placeholder="admin / api token" autocomplete="off">
   <button onclick="saveTok()">OK</button>
+  <button title="Перечитать config.yaml (провайдеры/роутинг/прайсинг)" style="background:#30363d;color:var(--text)" onclick="doReload()">⟳ reload</button>
 </div>
 <h1>claude-code-gateway</h1>
 <div class="sub">v<span id="ver">?</span> · uptime <span id="uptime">–</span> · моделей: <span id="nmodels">–</span> · автообновление 5с</div>
@@ -77,6 +78,9 @@ h2{font-size:14px;margin-bottom:10px;color:var(--dim);font-weight:600;text-trans
 
 <h2>По моделям (топ-15 по стоимости)</h2>
 <table><thead><tr><th>Модель</th><th class="num">Запросы</th><th class="num">In</th><th class="num">Out</th><th class="num">Cost</th></tr></thead><tbody id="bymodel"></tbody></table>
+
+<h2>Клиенты и бюджеты</h2>
+<table><thead><tr><th>Имя</th><th>Токен</th><th class="num">Лимит $</th><th class="num">Потрачено</th><th class="num">Остаток</th><th>Период / сброс</th><th></th></tr></thead><tbody id="tokens"></tbody></table>
 
 <h2>Последние запросы</h2>
 <table><thead><tr><th>Время</th><th>Модель</th><th>Провайдер</th><th class="num">ms</th><th class="num">In/Out</th><th class="num">Cost</th><th>Статус</th></tr></thead><tbody id="recent"></tbody></table>
@@ -162,6 +166,32 @@ async function load(){
     $('bymodel').innerHTML = models.length ? models.map(([k,v])=>`<tr><td>${esc(k)}</td><td class="num">${fmt(v.requests)}</td><td class="num">${fmt(v.input_tokens)}</td><td class="num">${fmt(v.output_tokens)}</td><td class="num">${fmtCost(v.cost_usd)}</td></tr>`).join('')
       : '<tr><td colspan="5" class="empty">нет данных</td></tr>';
 
+    jget('/admin/tokens').then(t => {
+      $('tokens').innerHTML = (t.tokens||[]).map((tr,i) =>
+        `<tr><td>${esc(tr.name)}</td><td style="color:var(--dim)">${esc(tr.token)}</td>`+
+        `<td class="num">${tr.unlimited ? '∞' : fmtCost(tr.budget_usd)}</td>`+
+        `<td class="num">${fmtCost(tr.spent_usd)}${tr.semantic_hit?'':''}</td>`+
+        `<td class="num">${tr.unlimited ? '—' : fmtCost(tr.remaining_usd)}</td>`+
+        `<td>${esc(tr.period||'lifetime')}${tr.resets_at && !tr.unlimited ? '<br><span style="color:var(--dim)">'+new Date(tr.resets_at).toLocaleString('ru-RU')+'</span>':''}</td>`+
+        `<td>${tr.unlimited ? '' : `<input id="nb${i}" type="number" step="0.5" value="${tr.budget_usd}" style="width:80px;background:var(--card);border:1px solid var(--border);color:var(--text);border-radius:6px;padding:4px 6px"> <button onclick="updBudget('${esc(tr.name)}', ${i})" class="mini">✓</button>`}</td></tr>`
+      ).join('') || '<tr><td colspan="7" class="empty">клиенты не настроены (см. clients: в конфиге)</td></tr>';
+    }).catch(()=>{ $('tokens').innerHTML = ''; });
+
+load();
+setInterval(load, 5000);
+
+async function updBudget(name, i){
+  const v = parseFloat(document.getElementById('nb'+i).value);
+  if (isNaN(v)) return;
+  await fetch('/admin/tokens/update', {
+    method:'POST',
+    headers:{'x-api-key': tok, 'Content-Type':'application/json'},
+    body: JSON.stringify({name, budget_usd:v})
+  });
+  load();
+}
+
+async function doReload(){
     const rec = [...(stats.recent||[])].reverse().slice(0,30);
     $('recent').innerHTML = rec.length ? rec.map(r=>{
       const cls = r.status>=500||r.status===0 ? 'sx' : r.status>=400 ? 's4' : 's2';
@@ -171,7 +201,7 @@ async function load(){
         <td class="num">${fmt(r.latency_ms)}</td>
         <td class="num">${fmt(r.input_tokens)}/${fmt(r.output_tokens)}</td>
         <td class="num">${fmtCost(r.cost_usd)}</td>
-        <td><span class="st ${cls}"></span>${r.status||'ERR'}${r.cached?' <span style="color:var(--warn)">[cache]</span>':''}${r.error?` <span class="errmsg" title="${esc(r.error)}">${esc(r.error)}</span>`:''}</td></tr>`;
+        <td><span class="st ${cls}"></span>${r.status||'ERR'}${r.cached?` <span style="color:var(--warn)">[${r.semantic_hit?'sem':'cache'}]</span>`:''}${r.error?` <span class="errmsg" title="${esc(r.error)}">${esc(r.error)}</span>`:''}</td></tr>`;
     }).join('') : '<tr><td colspan="7" class="empty">пока пусто — отправь запрос через Claude Code</td></tr>';
   } catch(e) {
     if (e.message === 'unauthorized'){ $('gate').classList.remove('hidden'); $('content').classList.add('hidden'); }
@@ -180,6 +210,22 @@ async function load(){
 
 load();
 setInterval(load, 5000);
+
+async function updBudget(name, i){
+  const v = parseFloat(document.getElementById('nb'+i).value);
+  if (isNaN(v)) return;
+  await fetch('/admin/tokens/update', {
+    method:'POST',
+    headers:{'x-api-key': tok, 'Content-Type':'application/json'},
+    body: JSON.stringify({name, budget_usd:v})
+  });
+  load();
+}
+
+async function doReload(){
+  const r = await fetch('/admin/reload', {method:'POST', headers:{'x-api-key': tok}});
+  if (r.ok) load();
+}
 </script>
 </body>
 </html>

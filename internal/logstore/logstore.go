@@ -20,6 +20,7 @@ type Record struct {
 	TTFTMs      int64     `json:"ttft_ms,omitempty"`
 	Stream      bool      `json:"stream"`
 	Cached      bool      `json:"cached,omitempty"`
+	SemanticHit bool      `json:"semantic_hit,omitempty"`
 	InTok       int64     `json:"input_tokens"`
 	OutTok      int64     `json:"output_tokens"`
 	CacheRead   int64     `json:"cache_read_tokens,omitempty"`

@@ -217,6 +217,11 @@ func (s *Server) handleMessages(w http.ResponseWriter, r *http.Request) {
 	}
 	stream := mreq.Stream
 
+	if blockedMsg := s.rails.checkRequest(&mreq, core.EstimateRequestTokens(&mreq)); blockedMsg != "" {
+		writeAnthropicError(w, http.StatusBadRequest, "invalid_request_error", "blocked by guardrail: "+blockedMsg)
+		return
+	}
+
 	est, hasImage, thinking := core.RequestTraits(&mreq)
 	if !s.budgets.allowsModel(token, mreq.Model) {
 		writeAnthropicError(w, http.StatusForbidden, "permission_error",
@@ -249,14 +254,39 @@ func (s *Server) handleMessages(w http.ResponseWriter, r *http.Request) {
 		}
 
 		var ck string
+		var semKey string
+		var semVec []float32
 		if !stream && s.cache != nil {
+			if s.fuzzy != nil {
+				if v, err := s.embedder.Embed(core.RequestFlatText(&mreq)); err == nil {
+					if k, _, found := s.fuzzy.Search(v); found {
+						semKey = k
+					} else {
+						semVec = v
+						semKey = "sem_" + core.RandHex(12)
+					}
+				}
+				if semKey != "" {
+					if e, found := s.cache.Get(semKey); found {
+						writeJSONMessage(w, e.Body)
+						s.logRecord(logstore.Record{
+							Time: time.Now(), Token: s.tokenLabel(token), Model: mreq.Model,
+							RequestID: reqID, TargetModel: tg.Model, Provider: p.Name(),
+							Status: http.StatusOK, Cached: true, SemanticHit: true,
+							InTok: e.In, OutTok: e.Out,
+							CostUSD: s.costFor(tg.Model, e.In, e.Out, 0, 0),
+						})
+						return
+					}
+				}
+			}
 			ck = cache.Key(p.Name(), tg.Model, payload)
 			if e, found := s.cache.Get(ck); found {
 				writeJSONMessage(w, e.Body)
 				s.logRecord(logstore.Record{
 					Time: time.Now(), Token: s.tokenLabel(token), Model: mreq.Model,
-					TargetModel: tg.Model, Provider: p.Name(), Status: http.StatusOK,
-					Cached: true, InTok: e.In, OutTok: e.Out,
+					RequestID: reqID, TargetModel: tg.Model, Provider: p.Name(),
+					Status: http.StatusOK, Cached: true, InTok: e.In, OutTok: e.Out,
 					CostUSD: s.costFor(tg.Model, e.In, e.Out, 0, 0),
 				})
 				return
@@ -365,7 +395,6 @@ func (s *Server) handleMessages(w http.ResponseWriter, r *http.Request) {
 				resp.Body.Close()
 			} else {
 				ct := resp.Header.Get("Content-Type")
-				var respBytes []byte
 				switch {
 				case p.Type() == "openai" && isSSEContentType(ct):
 					var mr *core.MessageResponse
@@ -402,6 +431,10 @@ func (s *Server) handleMessages(w http.ResponseWriter, r *http.Request) {
 				resp.Body.Close()
 
 				if serr == nil {
+					if blockedMsg := s.rails.checkResponse(respBytes); blockedMsg != "" {
+						writeAnthropicError(w, http.StatusBadRequest, "invalid_request_error", "blocked by guardrail: "+blockedMsg)
+						return
+					}
 					w.Header().Set("Content-Type", "application/json")
 					w.WriteHeader(http.StatusOK)
 					w.Write(respBytes)
@@ -432,6 +465,10 @@ func (s *Server) handleMessages(w http.ResponseWriter, r *http.Request) {
 
 			if ck != "" && len(respBytes) > 0 {
 				s.cache.Put(ck, cache.Entry{Body: respBytes, In: rec.InTok, Out: rec.OutTok})
+			}
+			if semKey != "" && semVec != nil && len(respBytes) > 0 {
+				s.cache.Put(semKey, cache.Entry{Body: respBytes, In: rec.InTok, Out: rec.OutTok})
+				s.fuzzy.Add(semKey, semVec)
 			}
 			return
 		}

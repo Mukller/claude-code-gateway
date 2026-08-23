@@ -16,6 +16,25 @@ cache:
   enabled: false
   ttl: 10m
   max_entries: 128
+  # Семантический кэш (Bifrost-style): похожие промпты -> закэшированный ответ.
+  # Нужен любой OpenAI-совместимый embeddings-endpoint.
+  semantic:
+    enabled: false
+    threshold: 0.93        # косинусная близость 0..1
+    endpoint: "https://api.openai.com/v1/embeddings"
+    model: "text-embedding-3-small"
+    key: "${EMBED_KEY}"
+
+# Guardrails (Portkey-style): блокировка и лимиты на запрос/ответ
+guardrails:
+  request:
+    max_input_tokens: 0            # 0 = выкл; иначе 400 при превышении оценки
+    blocked_patterns: []           # regex по тексту запроса -> 400
+    #   - '(?i)internal project codename'
+    denied_tools: []               # запрещённые имена тулов -> 400
+  response:
+    blocked_patterns: []           # regex по тексту ответа (только non-stream)
+    #   - 'SECRET_[A-Z0-9]+'
 
 # Вебхуки: POST JSON на каждое событие usage/error
 # X-CCG-Signature: sha256=hex(hmac_sha256(secret, body))

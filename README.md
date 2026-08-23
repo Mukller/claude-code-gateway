@@ -31,6 +31,13 @@
 - **Логи и стоимость**: каждая запись — токены, latency, статус, оценка стоимости в USD; JSONL-файл + агрегаты
 - **Кэш ответов (opt-in)**: одинаковые non-stream запросы отдаются из LRU+TTL кэша
   (`cache.enabled: true`) — для реплеев и оценок; в логе такие записи помечены `"cached":true`
+- **Семантический кэш** (как в Bifrost): опционально через embeddings-endpoint — похожие
+  промпты получают закэшированный ответ (косинусная близость, порог настраивается);
+  попадания помечены `[sem]` в дашборде
+- **Guardrails** (Portkey-style): блок-паттерны запроса и ответа (regex), лимит входных
+  токенов, запретительный список тулов — нарушители получают `400 blocked by guardrail`
+- **Управление клиентами рантайм** (one-api style): правка бюджета клиента через API/дашборд
+  без рестарта (`POST /admin/tokens/update`), снапшот конфига в `/admin/config`
 - **MCP-сервер** (как в OmniRoute): управляй гейтвеем из Claude — статистика, логи, модели,
   бюджеты, hot-reload и оценка стоимости. HTTP-транспорт `/mcp` или stdio (`-mcp`)
 - **Трансформеры запросов** (как transformers в CCR): `max_tokens_cap`, `set:key=value`,
@@ -264,7 +271,10 @@ rate limit, стриминг.
   (longContext / image / think), трансформеры запросов, алиасы для пикера моделей
 - [LiteLLM](https://github.com/BerriAI/litellm) — виртуальные ключи: бюджеты, allowed_models, TPM
 - [OmniRoute](https://github.com/diegosouzapw/OmniRoute) — MCP-сервер, фолбэк-цепочки, model discovery, дашборд
-- [one-api / new-api](https://github.com/songquanpeng/one-api) — веса каналов, circuit breaker, CSV-экспорт биллинга
+- [one-api / new-api](https://github.com/songquanpeng/one-api) — веса каналов, circuit breaker,
+  CSV-экспорт биллинга, рантайм-менеджмент ключей
 - [gpt-load](https://github.com/tbphp/gpt-load) — health-пробы пулов ключей
 - [uni-api](https://github.com/yym68686/uni-api) — per-key rate limits в YAML
 - [Helicone](https://github.com/Helicone/helicone) — TTFT-метрика
+- [Bifrost](https://github.com/maximhq/bifrost) — семантический кэш на эмбеддингах
+- [Portkey Gateway](https://github.com/Portkey-AI/gateway) — guardrails на запрос и ответ
