@@ -11,6 +11,7 @@ import (
 	"os"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"time"
 
 	"claude-code-gateway/internal/config"
@@ -24,6 +25,12 @@ type Provider struct {
 	saOnce sync.Once
 	saSrc  *SATokenSource
 	saErr  error
+
+	probeMu sync.Mutex
+	probe   ProbeInfo
+
+	consecFails   int32
+	openUntilUnix int64
 }
 
 func New(cfg config.Provider) *Provider {
@@ -61,15 +68,70 @@ func New(cfg config.Provider) *Provider {
 	if err != nil {
 		log.Printf("[provider %q] transformers: %v", cfg.Name, err)
 	}
-	return &Provider{
+	p := &Provider{
 		cfg:  cfg,
 		pool: NewPool(cfg.Keys),
 		http: &http.Client{Timeout: 0},
 		tfs:  tfs,
 	}
+	p.pool.SetWeight(cfg.Weight)
+	return p
+}
+
+const (
+	breakerThreshold = 5
+	breakerOpenFor   = 2 * time.Minute
+)
+
+func (p *Provider) NoteUpstream(ok bool) {
+	if ok {
+		atomic.StoreInt32(&p.consecFails, 0)
+		return
+	}
+	n := atomic.AddInt32(&p.consecFails, 1)
+	if n >= breakerThreshold {
+		atomic.StoreInt64(&p.openUntilUnix, time.Now().Add(breakerOpenFor).Unix())
+	}
+}
+
+func (p *Provider) IsOpen(now time.Time) bool {
+	u := atomic.LoadInt64(&p.openUntilUnix)
+	return u > 0 && now.Unix() < u
+}
+
+func (p *Provider) OpenForSeconds() int64 {
+	u := atomic.LoadInt64(&p.openUntilUnix)
+	if u == 0 {
+		return 0
+	}
+	d := u - time.Now().Unix()
+	if d < 0 {
+		return 0
+	}
+	return d
+}
+
+type ProbeInfo struct {
+	OK        bool      `json:"ok"`
+	LatencyMs int64     `json:"latency_ms"`
+	Error     string    `json:"error,omitempty"`
+	At        time.Time `json:"at"`
+}
+
+func (p *Provider) SetProbe(pi ProbeInfo) {
+	p.probeMu.Lock()
+	defer p.probeMu.Unlock()
+	p.probe = pi
+}
+
+func (p *Provider) Probe() ProbeInfo {
+	p.probeMu.Lock()
+	defer p.probeMu.Unlock()
+	return p.probe
 }
 
 func (p *Provider) Transforms() []TransformFunc { return p.tfs }
+func (p *Provider) Weight() int                 { return p.cfg.Weight }
 func (p *Provider) Name() string                { return p.cfg.Name }
 func (p *Provider) Type() string                { return p.cfg.Type }
 func (p *Provider) Pool() *Pool                 { return p.pool }

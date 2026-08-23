@@ -37,6 +37,8 @@ providers:
     keys:
       - "${NINE_ROUTER_KEY}"
     timeout: 300s
+    weight: 1                  # вес для load_balance-правил
+    probe_interval: 0s         # напр. 60s = периодический health-опрос /v1/models
     discover_models: true
     refresh_interval: 15m
     send_stream_options: false    # true = просить у upstream точный usage в стриме
@@ -113,7 +115,7 @@ routing:
     #   strip_prefix: true
     #   chain: [anthropic]
 
-# Именованные клиенты с бюджетом (идея из LiteLLM virtual keys).
+# Именованные клиенты с бюджетом (LiteLLM virtual keys / uni-api).
 # Бюджет исчерпан -> 429 budget exceeded до конца периода. Расход виден в /admin/tokens.
 # clients:
 #   - name: anton
@@ -122,6 +124,8 @@ routing:
 #     token: "${TOKEN_FOR_DIMA}"
 #     budget_usd: 20
 #     budget_period: monthly   # daily | weekly | monthly
+#     allowed_models: ["glm*", "combo/*"]  # пусто = все модели
+#     tpm: 200000             # потолок токенов в минуту (0 = выкл)
 
 pricing:
   - pattern: "claude-opus*"

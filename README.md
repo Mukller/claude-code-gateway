@@ -40,12 +40,20 @@
 - **Сценарная маршрутизация** (идея из claude-code-router): отдельные цепочки для
   длинного контекста (`long_context.threshold_tokens`), запросов с картинками (`image`)
   и thinking-запросов (`thinking`) — например, тяжёлый контекст уходит на модель с большим окном
-- **Бюджеты на клиентов** (идея из LiteLLM virtual keys): именованные токены с лимитом USD
-  на день/неделю/месяц; при исчерпании — `429 budget exceeded`; `/admin/tokens` показывает
-  расход и дату сброса
-- **Rate limit** (на токен клиента), admin-API (`/admin/stats`, `/admin/logs`, `/admin/tokens`,
-  `POST /admin/reload` — горячая перезагрузка провайдеров/роутинга/прайсинга без рестарта),
-  `/metrics` в формате Prometheus, healthcheck (`/healthz` + флаг `-healthcheck` для docker/compose)
+- **Бюджеты и лимиты на клиентов** (идея из LiteLLM virtual keys / uni-api): именованные токены
+  с лимитом USD на период, **белым списком моделей** (`allowed_models`) и **TPM-потолком**
+  (оценка токенов до отправки); при исчерпании — `429`, чужая модель — `403`;
+  `/admin/tokens` показывает расход и дату сброса
+- **Веса и load balancing** (one-api): `weight` у провайдера + `load_balance: true` в правиле —
+  взвешенное распределение вместо жёсткого failover-порядка
+- **Circuit breaker** (one-api/gpt-load): 5 ошибок подряд — провайдер пропускается на 2 минуты,
+  ключи при этом продолжают ротироваться независимо
+- **Health-пробы**: периодический опрос `/v1/models` апстрима (`probe_interval`),
+  статус/латентность видны в `/admin/keys`
+- **TTFT** (как в Helicone): время до первого байта стрима в каждом логе
+- **Экспорт CSV** (`/admin/export.csv`) и статистика по каждому ключу пула (`/admin/keys`)
+- **Rate limit** (на токен клиента), admin-API, `/metrics` в формате Prometheus,
+  healthcheck (`/healthz` + флаг `-healthcheck` для docker/compose)
 - **Вебхуки**: push событий `usage`/`error` на твой URL с HMAC-подписью (`X-CCG-Signature`)
 - **Лаунчер**: `gateway -launch -- "твои флаги claude"` — поднимает гейтвей и стартует Claude Code
   с уже прописанными env
@@ -254,5 +262,9 @@ rate limit, стриминг.
 
 - [claude-code-router](https://github.com/musistudio/claude-code-router) — сценарная маршрутизация
   (longContext / image / think), трансформеры запросов, алиасы для пикера моделей
-- [LiteLLM](https://github.com/BerriAI/litellm) — виртуальные ключи с бюджетами и spend tracking
+- [LiteLLM](https://github.com/BerriAI/litellm) — виртуальные ключи: бюджеты, allowed_models, TPM
 - [OmniRoute](https://github.com/diegosouzapw/OmniRoute) — MCP-сервер, фолбэк-цепочки, model discovery, дашборд
+- [one-api / new-api](https://github.com/songquanpeng/one-api) — веса каналов, circuit breaker, CSV-экспорт биллинга
+- [gpt-load](https://github.com/tbphp/gpt-load) — health-пробы пулов ключей
+- [uni-api](https://github.com/yym68686/uni-api) — per-key rate limits в YAML
+- [Helicone](https://github.com/Helicone/helicone) — TTFT-метрика

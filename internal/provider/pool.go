@@ -17,12 +17,16 @@ type keyState struct {
 	value     string
 	coolUntil time.Time
 	softFails int
+	picks     int64
+	fails     int64
+	successes int64
 }
 
 type Pool struct {
-	mu   sync.Mutex
-	keys []*keyState
-	idx  int
+	mu     sync.Mutex
+	keys   []*keyState
+	idx    int
+	weight int
 }
 
 func NewPool(keys []string) *Pool {
@@ -33,6 +37,15 @@ func NewPool(keys []string) *Pool {
 		}
 	}
 	return p
+}
+
+func (p *Pool) SetWeight(w int) {
+	if w <= 0 {
+		w = 1
+	}
+	p.mu.Lock()
+	defer p.mu.Unlock()
+	p.weight = w
 }
 
 func (p *Pool) Len() int {
@@ -67,6 +80,7 @@ func (p *Pool) Pick() (string, bool) {
 	var fallback *keyState
 	for i := 0; i < n; i++ {
 		k := p.keys[(p.idx+i)%n]
+		k.picks++
 		if now.After(k.coolUntil) {
 			p.idx = (p.idx + i + 1) % n
 			return k.value, true
@@ -94,7 +108,9 @@ func (p *Pool) ReportHint(key string, kind FailKind, minWait time.Duration) {
 		case Success:
 			k.softFails = 0
 			k.coolUntil = time.Time{}
+			k.successes++
 		case SoftFail:
+			k.fails++
 			k.softFails++
 			backoff := time.Duration(1<<uint(min(k.softFails-1, 5))) * 10 * time.Second
 			if backoff > 5*time.Minute {
@@ -119,3 +135,30 @@ func min(a, b int) int {
 	}
 	return b
 }
+
+type KeyStat struct {
+	Key       string    `json:"key"`
+	Picks     int64     `json:"attempts"`
+	Fails     int64     `json:"fails"`
+	Successes int64     `json:"successes"`
+	CoolUntil time.Time `json:"cool_until,omitempty"`
+}
+
+func (p *Pool) Stats() []KeyStat {
+	p.mu.Lock()
+	defer p.mu.Unlock()
+	out := make([]KeyStat, 0, len(p.keys))
+	for _, k := range p.keys {
+		v := k.value
+		if len(v) > 8 {
+			v = v[:8] + "..."
+		}
+		out = append(out, KeyStat{
+			Key: v, Picks: k.picks, Fails: k.fails,
+			Successes: k.successes, CoolUntil: k.coolUntil,
+		})
+	}
+	return out
+}
+
+func (p *Pool) Weight() int { return p.weight }

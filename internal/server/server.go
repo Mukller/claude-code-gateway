@@ -81,6 +81,8 @@ func (s *Server) Handler() http.Handler {
 	mux.HandleFunc("/admin/stats", s.requireAuth(s.handleAdminStats))
 	mux.HandleFunc("/admin/logs", s.requireAuth(s.handleAdminLogs))
 	mux.HandleFunc("/admin/tokens", s.requireAuth(s.handleAdminTokens))
+	mux.HandleFunc("/admin/keys", s.requireAuth(s.handleAdminKeys))
+	mux.HandleFunc("/admin/export.csv", s.requireAuth(s.handleExportCSV))
 	mux.HandleFunc("/admin/reload", s.requireAuth(s.handleAdminReload))
 	return s.withRecovery(s.withAccessLog(mux))
 }

@@ -4,6 +4,8 @@ import (
 	"context"
 	"fmt"
 	"log"
+	"math/rand"
+	"sort"
 	"strings"
 	"sync"
 	"time"
@@ -22,11 +24,12 @@ type CatalogEntry struct {
 }
 
 type compiledRule struct {
-	prefix  string
-	strip   bool
-	chain   []string
-	mmap    map[string]string
-	targets []Target
+	prefix      string
+	strip       bool
+	chain       []string
+	mmap        map[string]string
+	targets     []Target
+	loadBalance bool
 }
 
 type Registry struct {
@@ -66,10 +69,11 @@ func (r *Registry) apply(routing *config.Routing, provCfgs []config.Provider) {
 	var rules []compiledRule
 	for _, rc := range routing.Rules {
 		cr := compiledRule{
-			prefix: rc.Prefix,
-			strip:  rc.StripPrefix,
-			chain:  rc.Chain,
-			mmap:   rc.ModelMap,
+			prefix:      rc.Prefix,
+			strip:       rc.StripPrefix,
+			chain:       rc.Chain,
+			mmap:        rc.ModelMap,
+			loadBalance: rc.LoadBalance,
 		}
 		for _, t := range rc.Targets {
 			cr.targets = append(cr.targets, Target{Name: t.Provider, Model: t.Model})
@@ -153,23 +157,37 @@ type ResolveInfo struct {
 func (r *Registry) Resolve(model string, inf ResolveInfo) ([]Target, string) {
 	r.mu.RLock()
 	defer r.mu.RUnlock()
+	now := time.Now()
+	pick := func(tg []Target, m string) ([]Target, string) {
+		live := make([]Target, 0, len(tg))
+		for _, t := range tg {
+			if p := r.providers[t.Name]; p != nil && p.IsOpen(now) {
+				continue
+			}
+			live = append(live, t)
+		}
+		if len(live) == 0 {
+			return tg, m
+		}
+		return live, m
+	}
 	if tg, m, ok := r.matchScenarioLocked(model, inf); ok {
-		return tg, m
+		return pick(tg, m)
 	}
 	if tg, m, ok := r.matchRulesLocked(model); ok {
-		return tg, m
+		return pick(tg, m)
 	}
 	if r.alias && strings.HasPrefix(model, "claude/") && len(model) > len("claude/") {
 		stripped := strings.TrimPrefix(model, "claude/")
 		if tg, m, ok := r.matchRulesLocked(stripped); ok {
-			return tg, m
+			return pick(tg, m)
 		}
 	}
 	tg := make([]Target, 0, len(r.defChain))
 	for _, n := range r.defChain {
 		tg = append(tg, Target{Name: n, Model: model})
 	}
-	return tg, model
+	return pick(tg, model)
 }
 
 func chainTargets(chain []string, m string) []Target {
@@ -200,6 +218,9 @@ func (r *Registry) matchRulesLocked(model string) ([]Target, string, bool) {
 			if len(ru.targets) > 0 {
 				tg := make([]Target, len(ru.targets))
 				copy(tg, ru.targets)
+				if ru.loadBalance {
+					tg = r.weightedShuffleLocked(tg)
+				}
 				return tg, tg[0].Model, true
 			}
 			m := model
@@ -209,6 +230,13 @@ func (r *Registry) matchRulesLocked(model string) ([]Target, string, bool) {
 			if mapped, has := ru.mmap[m]; has {
 				m = mapped
 			}
+			if ru.loadBalance && len(ru.chain) > 1 {
+				tmp := make([]Target, 0, len(ru.chain))
+				for _, n := range ru.chain {
+					tmp = append(tmp, Target{Name: n, Model: m})
+				}
+				return r.weightedShuffleLocked(tmp), m, true
+			}
 			tg := make([]Target, 0, len(ru.chain))
 			for _, n := range ru.chain {
 				tg = append(tg, Target{Name: n, Model: m})
@@ -217,6 +245,29 @@ func (r *Registry) matchRulesLocked(model string) ([]Target, string, bool) {
 		}
 	}
 	return nil, "", false
+}
+
+func (r *Registry) weightedShuffleLocked(tg []Target) []Target {
+	out := make([]Target, len(tg))
+	copy(out, tg)
+	sort.SliceStable(out, func(i, j int) bool {
+		return weightedKey(r.weightOf(out[i].Name)) > weightedKey(r.weightOf(out[j].Name))
+	})
+	return out
+}
+
+func weightedKey(w int) float64 {
+	if w <= 0 {
+		w = 1
+	}
+	return rand.Float64() * float64(w)
+}
+
+func (r *Registry) weightOf(name string) int {
+	if p := r.providers[name]; p != nil {
+		return p.cfg.Weight
+	}
+	return 1
 }
 
 func (r *Registry) StartDiscovery(ctx context.Context) {
@@ -230,41 +281,54 @@ func (r *Registry) StartDiscovery(ctx context.Context) {
 
 func (r *Registry) runDiscovery(ctx context.Context) {
 	for _, p := range r.Providers() {
-		if !p.DiscoversModels() {
+		interval := p.cfg.RefreshInterval
+		if p.DiscoversModels() && interval > 0 {
+			go r.probeLoop(ctx, p, interval)
 			continue
 		}
-		go func(p *Provider) {
-			interval := p.cfg.RefreshInterval
-			if interval <= 0 {
-				interval = 30 * time.Minute
-			}
-			t := time.NewTicker(interval)
-			defer t.Stop()
+		if p.cfg.ProbeInterval > 0 && p.Type() == "openai" {
+			go r.probeLoop(ctx, p, p.cfg.ProbeInterval)
+		}
+	}
+}
+
+func (r *Registry) probeLoop(ctx context.Context, p *Provider, interval time.Duration) {
+	if interval <= 0 {
+		interval = 30 * time.Minute
+	}
+	t := time.NewTicker(interval)
+	defer t.Stop()
+	r.refreshModels(p)
+	for {
+		select {
+		case <-ctx.Done():
+			return
+		case <-t.C:
 			r.refreshModels(p)
-			for {
-				select {
-				case <-ctx.Done():
-					return
-				case <-t.C:
-					r.refreshModels(p)
-				}
-			}
-		}(p)
+		}
 	}
 }
 
 func (r *Registry) refreshModels(p *Provider) {
 	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
 	defer cancel()
+	started := time.Now()
 	models, err := p.FetchModels(ctx)
-	if err != nil {
-		log.Printf("[discovery] provider %q: %v", p.Name(), err)
-		return
+	pi := ProbeInfo{
+		OK:        err == nil,
+		LatencyMs: time.Since(started).Milliseconds(),
+		At:        time.Now(),
 	}
-	r.mu.Lock()
-	r.discovered[p.Name()] = models
-	r.mu.Unlock()
-	log.Printf("[discovery] provider %q: %d models", p.Name(), len(models))
+	if err != nil {
+		pi.Error = err.Error()
+		log.Printf("[probe] provider %q: %v", p.Name(), err)
+	} else {
+		r.mu.Lock()
+		r.discovered[p.Name()] = models
+		r.mu.Unlock()
+		log.Printf("[probe] provider %q: ok, %d models, %dms", p.Name(), len(models), pi.LatencyMs)
+	}
+	p.SetProbe(pi)
 }
 
 func (r *Registry) Catalog() []CatalogEntry {

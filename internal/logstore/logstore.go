@@ -17,6 +17,7 @@ type Record struct {
 	Provider    string    `json:"provider,omitempty"`
 	Status      int       `json:"status"`
 	LatencyMs   int64     `json:"latency_ms"`
+	TTFTMs      int64     `json:"ttft_ms,omitempty"`
 	Stream      bool      `json:"stream"`
 	Cached      bool      `json:"cached,omitempty"`
 	InTok       int64     `json:"input_tokens"`

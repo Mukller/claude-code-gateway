@@ -3,6 +3,7 @@ package server
 import (
 	"fmt"
 	"net/http"
+	"path"
 	"sort"
 	"strings"
 	"sync"
@@ -12,14 +13,18 @@ import (
 )
 
 type clientInfo struct {
-	Name   string
-	Limit  float64
-	Period string
+	Name          string
+	Limit         float64
+	Period        string
+	AllowedModels []string
+	TPM           int64
 }
 
 type budgetState struct {
 	spent     float64
 	periodKey string
+	tpmWin    int64
+	tpmUsed   int64
 }
 
 type budgets struct {
@@ -37,9 +42,57 @@ func newBudgets(clients []config.Client) *budgets {
 		if c.Token == "" {
 			continue
 		}
-		b.info[c.Token] = clientInfo{Name: c.Name, Limit: c.BudgetUSD, Period: c.BudgetPeriod}
+		b.info[c.Token] = clientInfo{
+			Name: c.Name, Limit: c.BudgetUSD, Period: c.BudgetPeriod,
+			AllowedModels: c.AllowedModels, TPM: c.TPM,
+		}
 	}
 	return b
+}
+
+func matchAnyPattern(patterns []string, model string) bool {
+	lm := strings.ToLower(model)
+	for _, p := range patterns {
+		if ok, err := path.Match(strings.ToLower(strings.TrimSpace(p)), lm); err == nil && ok {
+			return true
+		}
+		if strings.EqualFold(p, lm) {
+			return true
+		}
+	}
+	return false
+}
+
+func (b *budgets) allowsModel(token, model string) bool {
+	ci, ok := b.lookup(token)
+	if !ok || len(ci.AllowedModels) == 0 {
+		return true
+	}
+	return matchAnyPattern(ci.AllowedModels, model)
+}
+
+func (b *budgets) allowTPM(token string, est int64, now time.Time) bool {
+	ci, ok := b.lookup(token)
+	if !ok || ci.TPM <= 0 {
+		return true
+	}
+	b.mu.Lock()
+	defer b.mu.Unlock()
+	st := b.states[token]
+	if st == nil {
+		st = &budgetState{periodKey: periodKeyNow(ci.Period, now)}
+		b.states[token] = st
+	}
+	win := now.Unix() / 60
+	if st.tpmWin != win {
+		st.tpmWin = win
+		st.tpmUsed = 0
+	}
+	if st.tpmUsed+est > ci.TPM {
+		return false
+	}
+	st.tpmUsed += est
+	return true
 }
 
 func periodKeyNow(period string, now time.Time) string {

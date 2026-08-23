@@ -218,6 +218,16 @@ func (s *Server) handleMessages(w http.ResponseWriter, r *http.Request) {
 	stream := mreq.Stream
 
 	est, hasImage, thinking := core.RequestTraits(&mreq)
+	if !s.budgets.allowsModel(token, mreq.Model) {
+		writeAnthropicError(w, http.StatusForbidden, "permission_error",
+			fmt.Sprintf("model %q is not allowed for this client", mreq.Model))
+		return
+	}
+	if !s.budgets.allowTPM(token, est, time.Now()) {
+		writeAnthropicError(w, http.StatusTooManyRequests, "rate_limit_error",
+			fmt.Sprintf("tokens-per-minute limit exceeded (est %d tokens)", est))
+		return
+	}
 	targets, _ := s.reg.Resolve(mreq.Model, provider.ResolveInfo{
 		EstTokens: est,
 		HasImage:  hasImage,
@@ -279,6 +289,7 @@ func (s *Server) handleMessages(w http.ResponseWriter, r *http.Request) {
 			resp, uerr := p.Execute(r.Context(), key, upath, payload, stream)
 			if uerr != nil {
 				p.Pool().Report(key, provider.SoftFail)
+				p.NoteUpstream(false)
 				rec.Error = core.TrimString(uerr.Error(), 400)
 				s.logRecord(rec)
 				lastProv, lastMsg, lastStatus = p.Name(), rec.Error, 0
@@ -292,9 +303,11 @@ func (s *Server) handleMessages(w http.ResponseWriter, r *http.Request) {
 				switch kind {
 				case failHard:
 					p.Pool().Report(key, provider.HardFail)
+					p.NoteUpstream(false)
 				case failSoft:
 					hint := parseRetryAfter(resp.Header.Get("Retry-After"))
 					p.Pool().ReportHint(key, provider.SoftFail, hint)
+					p.NoteUpstream(false)
 				}
 				rec.Status = resp.Status
 				rec.Error = core.TrimString(FirstNonEmptyStr(resp.ErrMsg, string(data)), 400)
@@ -308,6 +321,7 @@ func (s *Server) handleMessages(w http.ResponseWriter, r *http.Request) {
 			}
 
 			p.Pool().Report(key, provider.Success)
+			p.NoteUpstream(true)
 			rec.Status = resp.Status
 
 			if p.Type() == "bedrock" && stream {
@@ -317,24 +331,25 @@ func (s *Server) handleMessages(w http.ResponseWriter, r *http.Request) {
 			var u core.Usage
 			var serr error
 			var respBytes []byte
+			fbw := &firstByteWriter{ResponseWriter: w}
 
 			if stream {
-				flush := newFlusher(w)
-				startSSEHeaders(w)
+				flush := newFlusher(fbw)
+				startSSEHeaders(fbw)
 				flush()
 				ct := resp.Header.Get("Content-Type")
 				switch {
 				case p.Type() == "openai" && isSSEContentType(ct):
-					u, serr = core.TranslateOpenAIStream(w, flush, resp.Body, tg.Model)
+					u, serr = core.TranslateOpenAIStream(fbw, flush, resp.Body, tg.Model)
 				case p.Type() == "openai":
 					var mr *core.MessageResponse
 					mr, serr = core.CollectOpenAIStream(resp.Body)
 					if serr == nil {
-						core.WriteSyntheticStream(w, flush, mr)
+						core.WriteSyntheticStream(fbw, flush, mr)
 						u = mr.Usage
 					}
 				case isSSEContentType(ct):
-					u, serr = core.PassthroughAnthropicStream(w, flush, resp.Body)
+					u, serr = core.PassthroughAnthropicStream(fbw, flush, resp.Body)
 				default:
 					var mr core.MessageResponse
 					data, rerr := io.ReadAll(io.LimitReader(resp.Body, maxResponseBytes))
@@ -343,7 +358,7 @@ func (s *Server) handleMessages(w http.ResponseWriter, r *http.Request) {
 					} else if jerr := json.Unmarshal(data, &mr); jerr != nil {
 						serr = jerr
 					} else {
-						core.WriteSyntheticStream(w, flush, &mr)
+						core.WriteSyntheticStream(fbw, flush, &mr)
 						u = mr.Usage
 					}
 				}
@@ -394,6 +409,9 @@ func (s *Server) handleMessages(w http.ResponseWriter, r *http.Request) {
 			}
 
 			rec.LatencyMs = time.Since(started).Milliseconds()
+			if stream {
+				rec.TTFTMs = fbw.ttft(started)
+			}
 			if serr != nil {
 				rec.Error = core.TrimString(serr.Error(), 300)
 				s.logRecord(rec)

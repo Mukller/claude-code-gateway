@@ -65,7 +65,9 @@ func testConfig(providers []config.Provider, chain []string) *config.Config {
 func buildTestServer(t *testing.T, cfg *config.Config) (*Server, *httptest.Server) {
 	t.Helper()
 	reg := provider.NewRegistry(&cfg.Routing, cfg.Providers)
-	store, err := logstore.New(filepath.Join(t.TempDir(), "usage.jsonl"), 100)
+	logPath := filepath.Join(t.TempDir(), "usage.jsonl")
+	cfg.Logging.File = logPath
+	store, err := logstore.New(logPath, 100)
 	if err != nil {
 		t.Fatal(err)
 	}

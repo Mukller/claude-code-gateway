@@ -24,10 +24,12 @@ type Config struct {
 }
 
 type Client struct {
-	Name         string  `yaml:"name"`
-	Token        string  `yaml:"token"`
-	BudgetUSD    float64 `yaml:"budget_usd"`
-	BudgetPeriod string  `yaml:"budget_period"`
+	Name          string   `yaml:"name"`
+	Token         string   `yaml:"token"`
+	BudgetUSD     float64  `yaml:"budget_usd"`
+	BudgetPeriod  string   `yaml:"budget_period"`
+	AllowedModels []string `yaml:"allowed_models"`
+	TPM           int64    `yaml:"tpm"`
 }
 
 type Webhook struct {
@@ -72,6 +74,8 @@ type Provider struct {
 	SendStreamOptions  bool              `yaml:"send_stream_options"`
 	Region             string            `yaml:"region"`
 	ServiceAccountJSON string            `yaml:"service_account_json"`
+	Weight             int               `yaml:"weight"`
+	ProbeInterval      time.Duration     `yaml:"probe_interval"`
 }
 
 type Routing struct {
@@ -102,6 +106,7 @@ type Rule struct {
 	Chain       []string          `yaml:"chain"`
 	ModelMap    map[string]string `yaml:"model_map"`
 	Targets     []RouteTarget     `yaml:"targets"`
+	LoadBalance bool              `yaml:"load_balance"`
 }
 
 type RouteTarget struct {
