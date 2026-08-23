@@ -27,6 +27,7 @@ type Server struct {
 	limiter    *ratelimit.Limiter
 	cache      *cache.Cache
 	hooks      []webhookTarget
+	budgets    *budgets
 	started    time.Time
 	tokens     map[string]bool
 	ConfigPath string
@@ -51,6 +52,12 @@ func New(cfg *config.Config, reg *provider.Registry, store *logstore.Store, pric
 			s.tokens[t] = true
 		}
 	}
+	for _, c := range cfg.Clients {
+		if c.Token != "" {
+			s.tokens[c.Token] = true
+		}
+	}
+	s.budgets = newBudgets(cfg.Clients)
 	return s
 }
 
@@ -69,6 +76,7 @@ func (s *Server) Handler() http.Handler {
 	mux.HandleFunc("/admin/dashboard", s.handleDashboard)
 	mux.HandleFunc("/admin/stats", s.requireAuth(s.handleAdminStats))
 	mux.HandleFunc("/admin/logs", s.requireAuth(s.handleAdminLogs))
+	mux.HandleFunc("/admin/tokens", s.requireAuth(s.handleAdminTokens))
 	mux.HandleFunc("/admin/reload", s.requireAuth(s.handleAdminReload))
 	return s.withRecovery(s.withAccessLog(mux))
 }

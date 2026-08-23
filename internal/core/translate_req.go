@@ -198,6 +198,32 @@ func TranslateRequest(m *MessagesRequest, targetModel string) (*ChatRequest, err
 	return out, nil
 }
 
+func RequestTraits(m *MessagesRequest) (estTokens int64, hasImage, thinking bool) {
+	estTokens = EstimateRequestTokens(m)
+	for _, am := range m.Messages {
+		bs, _ := BlocksFromRaw(am.Content)
+		for _, b := range bs {
+			if b.Type == "image" && b.Source != nil {
+				hasImage = true
+			}
+		}
+	}
+	if len(m.Thinking) > 0 {
+		var th struct {
+			Type string `json:"type"`
+		}
+		if json.Unmarshal(m.Thinking, &th) == nil {
+			switch th.Type {
+			case "enabled", "adaptive":
+				thinking = true
+			}
+		} else {
+			thinking = true
+		}
+	}
+	return estTokens, hasImage, thinking
+}
+
 func EstimateRequestTokens(m *MessagesRequest) int64 {
 	var sb strings.Builder
 	sb.WriteString(SystemText(m.System))

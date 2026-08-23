@@ -35,6 +35,7 @@ type Registry struct {
 	rules      []compiledRule
 	defChain   []string
 	alias      bool
+	scenarios  config.Scenarios
 	discovered map[string][]string
 
 	genMu     sync.Mutex
@@ -82,6 +83,7 @@ func (r *Registry) apply(routing *config.Routing, provCfgs []config.Provider) {
 	r.rules = rules
 	r.defChain = routing.DefaultChain
 	r.alias = routing.AliasClaudePrefix
+	r.scenarios = routing.Scenarios
 	r.discovered = map[string][]string{}
 }
 
@@ -137,9 +139,18 @@ func (r *Registry) Providers() []*Provider {
 	return out
 }
 
-func (r *Registry) Resolve(model string) ([]Target, string) {
+type ResolveInfo struct {
+	EstTokens int64
+	HasImage  bool
+	Thinking  bool
+}
+
+func (r *Registry) Resolve(model string, inf ResolveInfo) ([]Target, string) {
 	r.mu.RLock()
 	defer r.mu.RUnlock()
+	if tg, m, ok := r.matchScenarioLocked(model, inf); ok {
+		return tg, m
+	}
 	if tg, m, ok := r.matchRulesLocked(model); ok {
 		return tg, m
 	}
@@ -154,6 +165,28 @@ func (r *Registry) Resolve(model string) ([]Target, string) {
 		tg = append(tg, Target{Name: n, Model: model})
 	}
 	return tg, model
+}
+
+func chainTargets(chain []string, m string) []Target {
+	tg := make([]Target, 0, len(chain))
+	for _, n := range chain {
+		tg = append(tg, Target{Name: n, Model: m})
+	}
+	return tg
+}
+
+func (r *Registry) matchScenarioLocked(model string, inf ResolveInfo) ([]Target, string, bool) {
+	sc := r.scenarios
+	if lc := sc.LongContext; lc != nil && lc.ThresholdTokens > 0 && inf.EstTokens >= lc.ThresholdTokens && len(lc.Chain) > 0 {
+		return chainTargets(lc.Chain, model), model, true
+	}
+	if inf.HasImage && sc.Image != nil && len(sc.Image.Chain) > 0 {
+		return chainTargets(sc.Image.Chain, model), model, true
+	}
+	if inf.Thinking && sc.Thinking != nil && len(sc.Thinking.Chain) > 0 {
+		return chainTargets(sc.Thinking.Chain, model), model, true
+	}
+	return nil, "", false
 }
 
 func (r *Registry) matchRulesLocked(model string) ([]Target, string, bool) {

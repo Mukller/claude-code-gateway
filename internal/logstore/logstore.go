@@ -11,6 +11,7 @@ import (
 type Record struct {
 	Time        time.Time `json:"time"`
 	Token       string    `json:"token,omitempty"`
+	RequestID   string    `json:"request_id,omitempty"`
 	Model       string    `json:"model"`
 	TargetModel string    `json:"target_model,omitempty"`
 	Provider    string    `json:"provider,omitempty"`

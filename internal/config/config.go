@@ -20,6 +20,14 @@ type Config struct {
 	RateLimit int         `yaml:"rate_limit_rpm"`
 	Cache     Cache       `yaml:"cache"`
 	Webhooks  []Webhook   `yaml:"webhooks"`
+	Clients   []Client    `yaml:"clients"`
+}
+
+type Client struct {
+	Name         string  `yaml:"name"`
+	Token        string  `yaml:"token"`
+	BudgetUSD    float64 `yaml:"budget_usd"`
+	BudgetPeriod string  `yaml:"budget_period"`
 }
 
 type Webhook struct {
@@ -66,9 +74,25 @@ type Provider struct {
 }
 
 type Routing struct {
-	DefaultChain      []string `yaml:"default_chain"`
-	AliasClaudePrefix bool     `yaml:"alias_claude_prefix"`
-	Rules             []Rule   `yaml:"rules"`
+	DefaultChain      []string  `yaml:"default_chain"`
+	AliasClaudePrefix bool      `yaml:"alias_claude_prefix"`
+	Rules             []Rule    `yaml:"rules"`
+	Scenarios         Scenarios `yaml:"scenarios"`
+}
+
+type Scenarios struct {
+	LongContext *LongContextScenario `yaml:"long_context"`
+	Image       *ChainScenario       `yaml:"image"`
+	Thinking    *ChainScenario       `yaml:"thinking"`
+}
+
+type LongContextScenario struct {
+	ThresholdTokens int64    `yaml:"threshold_tokens"`
+	Chain           []string `yaml:"chain"`
+}
+
+type ChainScenario struct {
+	Chain []string `yaml:"chain"`
 }
 
 type Rule struct {

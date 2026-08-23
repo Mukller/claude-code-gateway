@@ -180,8 +180,16 @@ func (s *Server) handleMessages(w http.ResponseWriter, r *http.Request) {
 		writeAnthropicError(w, http.StatusUnauthorized, "authentication_error", "invalid or missing API token")
 		return
 	}
+	reqID := core.RandHex(8)
+	w.Header().Set("X-Ccg-Request-Id", reqID)
 	if !s.limiter.Allow(token, time.Now()) {
 		writeAnthropicError(w, http.StatusTooManyRequests, "rate_limit_error", "rate limit exceeded")
+		return
+	}
+	if ci, spent, over := s.budgets.exceeded(token, time.Now()); over {
+		writeAnthropicError(w, http.StatusTooManyRequests, "rate_limit_error",
+			fmt.Sprintf("budget exceeded for client %q: $%.4f spent of $%.2f limit (resets %s)",
+				ci.Name, spent, ci.Limit, nextReset(ci.Period, time.Now()).Format(time.RFC3339)))
 		return
 	}
 	body, err := io.ReadAll(http.MaxBytesReader(w, r.Body, maxBodyBytes))
@@ -196,7 +204,12 @@ func (s *Server) handleMessages(w http.ResponseWriter, r *http.Request) {
 	}
 	stream := mreq.Stream
 
-	targets, _ := s.reg.Resolve(mreq.Model)
+	est, hasImage, thinking := core.RequestTraits(&mreq)
+	targets, _ := s.reg.Resolve(mreq.Model, provider.ResolveInfo{
+		EstTokens: est,
+		HasImage:  hasImage,
+		Thinking:  thinking,
+	})
 	attemptsLeft := s.cfg.Retry.MaxAttempts
 	lastProv, lastMsg := "", ""
 	lastStatus := 0
@@ -218,7 +231,7 @@ func (s *Server) handleMessages(w http.ResponseWriter, r *http.Request) {
 			if e, found := s.cache.Get(ck); found {
 				writeJSONMessage(w, e.Body)
 				s.logRecord(logstore.Record{
-					Time: time.Now(), Token: maskToken(token), Model: mreq.Model,
+					Time: time.Now(), Token: s.tokenLabel(token), Model: mreq.Model,
 					TargetModel: tg.Model, Provider: p.Name(), Status: http.StatusOK,
 					Cached: true, InTok: e.In, OutTok: e.Out,
 					CostUSD: s.costFor(tg.Model, e.In, e.Out, 0, 0),
@@ -241,7 +254,8 @@ func (s *Server) handleMessages(w http.ResponseWriter, r *http.Request) {
 
 			rec := logstore.Record{
 				Time:        time.Now(),
-				Token:       maskToken(token),
+				Token:       s.tokenLabel(token),
+				RequestID:   reqID,
 				Model:       mreq.Model,
 				TargetModel: tg.Model,
 				Provider:    p.Name(),
@@ -382,6 +396,7 @@ func (s *Server) handleMessages(w http.ResponseWriter, r *http.Request) {
 				rec.InTok = core.EstimateRequestTokens(&mreq)
 			}
 			rec.CostUSD = s.costFor(tg.Model, rec.InTok, rec.OutTok, rec.CacheRead, rec.CacheWrite)
+			s.budgets.add(token, rec.CostUSD, time.Now())
 			s.logRecord(rec)
 
 			if ck != "" && len(respBytes) > 0 {
@@ -403,7 +418,7 @@ func (s *Server) handleMessages(w http.ResponseWriter, r *http.Request) {
 	}
 	writeAnthropicError(w, status, "overloaded_error", msg)
 	s.logRecord(logstore.Record{
-		Time: time.Now(), Token: maskToken(token), Model: mreq.Model,
+		Time: time.Now(), Token: s.tokenLabel(token), Model: mreq.Model,
 		Status: status, Error: core.TrimString(msg, 400),
 	})
 }

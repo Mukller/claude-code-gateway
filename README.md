@@ -31,9 +31,15 @@
 - **Логи и стоимость**: каждая запись — токены, latency, статус, оценка стоимости в USD; JSONL-файл + агрегаты
 - **Кэш ответов (opt-in)**: одинаковые non-stream запросы отдаются из LRU+TTL кэша
   (`cache.enabled: true`) — для реплеев и оценок; в логе такие записи помечены `"cached":true`
-- **Rate limit** (на токен клиента), admin-API (`/admin/stats`, `/admin/logs`, `POST /admin/reload` — горячая
-  перезагрузка провайдеров/роутинга/прайсинга без рестарта), `/metrics` в формате Prometheus,
-  healthcheck (`/healthz` + флаг `-healthcheck` для docker/compose)
+- **Сценарная маршрутизация** (идея из claude-code-router): отдельные цепочки для
+  длинного контекста (`long_context.threshold_tokens`), запросов с картинками (`image`)
+  и thinking-запросов (`thinking`) — например, тяжёлый контекст уходит на модель с большим окном
+- **Бюджеты на клиентов** (идея из LiteLLM virtual keys): именованные токены с лимитом USD
+  на день/неделю/месяц; при исчерпании — `429 budget exceeded`; `/admin/tokens` показывает
+  расход и дату сброса
+- **Rate limit** (на токен клиента), admin-API (`/admin/stats`, `/admin/logs`, `/admin/tokens`,
+  `POST /admin/reload` — горячая перезагрузка провайдеров/роутинга/прайсинга без рестарта),
+  `/metrics` в формате Prometheus, healthcheck (`/healthz` + флаг `-healthcheck` для docker/compose)
 - **Вебхуки**: push событий `usage`/`error` на твой URL с HMAC-подписью (`X-CCG-Signature`)
 - **Лаунчер**: `gateway -launch -- "твои флаги claude"` — поднимает гейтвей и стартует Claude Code
   с уже прописанными env
@@ -197,3 +203,12 @@ rate limit, стриминг.
 
 - Дедупликация вебхуков (retry с backoff)
 - Кэширование стримовых ответов (идемпотентность спорна — пока не делаем)
+
+## Credits
+
+Идеи честно украдены у лучших в классе:
+
+- [claude-code-router](https://github.com/musistudio/claude-code-router) — сценарная маршрутизация
+  (longContext / image / think), алиасы для пикера моделей
+- [LiteLLM](https://github.com/BerriAI/litellm) — виртуальные ключи с бюджетами и spend tracking
+- [OmniRoute](https://github.com/diegosouzapw/OmniRoute) — фолбэк-цепочки, model discovery, дашборд

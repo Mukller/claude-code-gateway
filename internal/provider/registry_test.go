@@ -21,7 +21,7 @@ func TestRegistrySwap(t *testing.T) {
 		{Name: "a", Type: "openai", BaseURL: "https://a.test/v1", Keys: []string{"k1"}},
 	})
 
-	tg, _ := reg.Resolve("anything")
+	tg, _ := reg.Resolve("anything", ResolveInfo{})
 	if len(tg) != 1 || tg[0].Name != "a" {
 		t.Fatalf("initial resolve = %+v", tg)
 	}
@@ -42,7 +42,7 @@ func TestRegistrySwap(t *testing.T) {
 	if reg.Provider("b") == nil {
 		t.Fatal("new provider missing")
 	}
-	tg, model := reg.Resolve("special/x")
+	tg, model := reg.Resolve("special/x", ResolveInfo{})
 	if len(tg) != 1 || tg[0].Name != "b" || tg[0].Model != "x" || model != "x" {
 		t.Fatalf("resolve after swap = %+v (model %q)", tg, model)
 	}

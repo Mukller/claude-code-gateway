@@ -86,11 +86,30 @@ routing:
   alias_claude_prefix: true
   default_chain:
     - nine-router
+  # Сценарная маршрутизация (как в claude-code-router):
+  # scenarios:
+  #   long_context:              # запросы > N токенов уходят на свою цепочку
+  #     threshold_tokens: 60000
+  #     chain: [big-context-provider]
+  #   image:                     # запросы с картинками
+  #     chain: [vision-provider]
+  #   thinking:                  # thinking/extended-thinking запросы
+  #     chain: [thinker-provider]
   rules:
     # model "anthropic/claude-*" уходит напрямую в Anthropic (если провайдер включён)
     # - prefix: "anthropic/"
     #   strip_prefix: true
     #   chain: [anthropic]
+
+# Именованные клиенты с бюджетом (идея из LiteLLM virtual keys).
+# Бюджет исчерпан -> 429 budget exceeded до конца периода. Расход виден в /admin/tokens.
+# clients:
+#   - name: anton
+#     token: "${GATEWAY_TOKEN}"
+#   - name: dima
+#     token: "${TOKEN_FOR_DIMA}"
+#     budget_usd: 20
+#     budget_period: monthly   # daily | weekly | monthly
 
 pricing:
   - pattern: "claude-opus*"

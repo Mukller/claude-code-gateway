@@ -69,7 +69,8 @@ func buildTestServer(t *testing.T, cfg *config.Config) (*Server, *httptest.Serve
 	if err != nil {
 		t.Fatal(err)
 	}
-	s := New(cfg, reg, store, pricing.New(nil))
+	tbl := pricing.New(cfg.Pricing)
+	s := New(cfg, reg, store, tbl)
 	ts := httptest.NewServer(s.Handler())
 	t.Cleanup(func() {
 		ts.Close()
