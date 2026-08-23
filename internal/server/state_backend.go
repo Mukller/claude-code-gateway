@@ -13,6 +13,18 @@ import (
 
 func (s *Server) initStateStore() {
 	url := s.cfg.State.RedisURL
+	if pgURL := s.cfg.State.PostgresURL; pgURL != "" {
+		pg, err := state.NewPostgres(pgURL, orDefault(s.cfg.State.Prefix, "ccg"))
+		if err != nil {
+			log.Printf("[state] postgres unavailable (%v), trying redis/memory", err)
+		} else {
+			s.storeBackend = pg
+			s.limiter.SetStore(pg, "")
+			s.budgets.SetStore(pg, "")
+			log.Printf("[state] using postgres")
+			return
+		}
+	}
 	if url == "" {
 		s.storeBackend = state.NewMemory()
 		return
@@ -29,7 +41,16 @@ func (s *Server) initStateStore() {
 		rs.SetPrefix(s.cfg.State.Prefix + ":")
 	}
 	s.storeBackend = rs
+	s.limiter.SetStore(rs, "")
+	s.budgets.SetStore(rs, "")
 	log.Printf("[state] using redis at %s (prefix %s)", url, rs.GetPrefix())
+}
+
+func orDefault(v, def string) string {
+	if v == "" {
+		return def
+	}
+	return v
 }
 
 type cachedEntryWire struct {

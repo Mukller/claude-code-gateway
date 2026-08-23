@@ -222,6 +222,67 @@ func RequestFlatText(m *MessagesRequest) string {
 	return sb.String()
 }
 
+func RedactRequestText(m *MessagesRequest, redact func(string) string) {
+	if len(m.System) > 0 {
+		var sysBlocks []Block
+		if s := SystemText(m.System); s != "" {
+			_ = s
+			var raw string
+			if json.Unmarshal(m.System, &raw) == nil {
+				m.System, _ = json.Marshal(redact(raw))
+			} else {
+				if bs, err := BlocksFromRaw(m.System); err == nil {
+					sysBlocks = bs
+				}
+				for i := range sysBlocks {
+					if sysBlocks[i].Type == "text" {
+						sysBlocks[i].Text = redact(sysBlocks[i].Text)
+					}
+				}
+				if sysBlocks != nil {
+					if out, err := json.Marshal(sysBlocks); err == nil {
+						m.System = out
+					}
+				}
+			}
+		}
+	}
+	for mi := range m.Messages {
+		bs, err := BlocksFromRaw(m.Messages[mi].Content)
+		if err != nil {
+			continue
+		}
+		changed := false
+		for i := range bs {
+			switch bs[i].Type {
+			case "text":
+				nv := redact(bs[i].Text)
+				if nv != bs[i].Text {
+					bs[i].Text = nv
+					changed = true
+				}
+			case "tool_result":
+				nv := redact(FlattenContent(bs[i].Content))
+				if out, err := json.Marshal(nv); err == nil && string(out) != string(bs[i].Content) {
+					bs[i].Content = out
+					changed = true
+				}
+			}
+		}
+		if changed {
+			if len(bs) == 1 && bs[0].Type == "text" {
+				if out, err := json.Marshal(bs[0].Text); err == nil {
+					m.Messages[mi].Content = out
+					continue
+				}
+			}
+			if out, err := json.Marshal(bs); err == nil {
+				m.Messages[mi].Content = out
+			}
+		}
+	}
+}
+
 func RequestTraits(m *MessagesRequest) (estTokens int64, hasImage, thinking bool) {
 	estTokens = EstimateRequestTokens(m)
 	for _, am := range m.Messages {

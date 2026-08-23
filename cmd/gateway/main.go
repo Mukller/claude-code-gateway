@@ -79,6 +79,7 @@ func main() {
 	srv := server.New(cfg, reg, store, prices)
 	srv.ConfigPath = *cfgPath
 	server.Version = version
+	srv.StartPriceSync(ctx)
 
 	if *stdioMCP {
 		log.SetFlags(0)

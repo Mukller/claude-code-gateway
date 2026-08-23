@@ -31,6 +31,16 @@
 - **Логи и стоимость**: каждая запись — токены, latency, статус, оценка стоимости в USD; JSONL-файл + агрегаты
 - **Кэш ответов (opt-in)**: одинаковые non-stream запросы отдаются из LRU+TTL кэша
   (`cache.enabled: true`) — для реплеев и оценок; в логе такие записи помечены `"cached":true`
+- **Стратегии балансировки** (LiteLLM): `balance_strategy: weighted | least_busy | latency`
+  в правилах — weighted-random по весам, по минимуму активных запросов или по скользящей
+  латентности (EMA) провайдера
+- **Автосинк цен** (new-api): `pricing_sync` подтягивает цены всех моделей с OpenRouter
+  раз в интервал; явные правила из `pricing:` всегда приоритетнее
+- **Guardrails+** (Portkey): PII-пресеты (`pii_presets: [email, phone, card]` — маскируются
+  в исходящих промптах), детект prompt-injection (`injection_detection: block|flag|off`),
+  опциональный буферизованный скан стримов (`scan_streams: true`)
+- **Postgres-persistence** (LiteLLM): `state.postgres_url` — бюджеты и лимиты переживают
+  рестарт и синхронны между репликами (приоритет над Redis)
 - **Распределённое состояние** (one-api/LiteLLM multi-replica style): `state.redis_url` —
   RPM/TPM-счётчики, бюджеты и кэш ответов живут в Redis (свой RESP2-клиент на stdlib,
   ноль зависимостей); без Redis всё работает локально in-memory

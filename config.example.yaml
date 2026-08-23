@@ -12,10 +12,17 @@ auth:
 rate_limit_rpm: 0
 
 # Распределённое состояние для нескольких реплик гейтвея (опционально).
-# Если задан — RPM/TPM, бюджеты и кэш ответов синхронизируются через Redis.
+# postgres_url приоритетнее redis_url. Без обоих — in-memory.
 # state:
+#   postgres_url: "postgres://user:pass@localhost:5432/ccg"
 #   redis_url: "redis://localhost:6379"
 #   prefix: "ccg"
+
+# Автосинк цен моделей с OpenRouter (правила из pricing: всегда приоритетнее)
+pricing_sync:
+  enabled: false
+  interval: 6h
+  # endpoint: "https://openrouter.ai/api/v1/models"
 
 # Кэш одинаковых non-stream ответов (для реплеев/оценок). Выкл по умолчанию!
 cache:
@@ -38,9 +45,12 @@ guardrails:
     blocked_patterns: []           # regex по тексту запроса -> 400
     #   - '(?i)internal project codename'
     denied_tools: []               # запрещённые имена тулов -> 400
+    pii_presets: []                # маскировка в исходящих промптах: email, phone, card
+    #   - email
+    injection_detection: "off"     # off | flag | block — детект prompt-injection
   response:
-    blocked_patterns: []           # regex по тексту ответа (только non-stream)
-    #   - 'SECRET_[A-Z0-9]+'
+    blocked_patterns: []           # regex по тексту ответа
+    scan_streams: false            # true = буферизовать стримы и сканировать тоже
 
 # Вебхуки: POST JSON на каждое событие usage/error
 # X-CCG-Signature: sha256=hex(hmac_sha256(secret, body))
@@ -128,10 +138,10 @@ routing:
   #   image:                     # запросы с картинками
   #     chain: [vision-provider]
   #   thinking:                  # thinking/extended-thinking запросы
-  #     chain: [thinker-provider]
-  rules:
-    # Комбо-модель: один алиас -> цепочка РАЗНЫХ моделей (фолбэк внутри комбо)
+  #     chain: [thinker-provider]  rules:
+    # Комбо-модель с балансировкой по латентности:
     # - prefix: "combo/fast"
+    #   balance_strategy: latency   # weighted | least_busy | latency
     #   targets:
     #     - { provider: nine-router, model: ag/gemini-3.7-flash-low }
     #     - { provider: nine-router, model: ag/gpt-oss-120b-medium }

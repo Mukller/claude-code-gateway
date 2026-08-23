@@ -217,6 +217,8 @@ func (s *Server) handleMessages(w http.ResponseWriter, r *http.Request) {
 	}
 	stream := mreq.Stream
 
+	s.rails.redactPII(&mreq)
+	body, _ = json.Marshal(&mreq)
 	if blockedMsg := s.rails.checkRequest(&mreq, core.EstimateRequestTokens(&mreq)); blockedMsg != "" {
 		writeAnthropicError(w, http.StatusBadRequest, "invalid_request_error", "blocked by guardrail: "+blockedMsg)
 		return
@@ -305,6 +307,7 @@ func (s *Server) handleMessages(w http.ResponseWriter, r *http.Request) {
 				continue
 			}
 			triedKeys[key] = true
+			p.BeginRequest()
 
 			rec := logstore.Record{
 				Time:        time.Now(),
@@ -319,6 +322,7 @@ func (s *Server) handleMessages(w http.ResponseWriter, r *http.Request) {
 
 			resp, uerr := p.Execute(r.Context(), key, upath, payload, stream)
 			if uerr != nil {
+				p.EndRequest(time.Since(started).Milliseconds())
 				p.Pool().Report(key, provider.SoftFail)
 				p.NoteUpstream(false)
 				rec.Error = core.TrimString(uerr.Error(), 400)
@@ -330,6 +334,7 @@ func (s *Server) handleMessages(w http.ResponseWriter, r *http.Request) {
 			if resp.Status >= 400 {
 				data, _ := io.ReadAll(io.LimitReader(resp.Body, 1<<16))
 				resp.Body.Close()
+				p.EndRequest(time.Since(started).Milliseconds())
 				kind := classifyStatus(resp.Status, s.cfg.Retry.RetryStatuses, s.cfg.Retry.KeyFailStatus)
 				switch kind {
 				case failHard:
@@ -366,10 +371,31 @@ func (s *Server) handleMessages(w http.ResponseWriter, r *http.Request) {
 
 			if stream {
 				flush := newFlusher(fbw)
-				startSSEHeaders(fbw)
-				flush()
 				ct := resp.Header.Get("Content-Type")
+				bufferedScan := s.rails.streamScanEnabled()
+				if !bufferedScan {
+					startSSEHeaders(fbw)
+					flush()
+				}
 				switch {
+				case bufferedScan:
+					var mr *core.MessageResponse
+					if p.Type() != "openai" && isSSEContentType(ct) {
+						mr, serr = core.CollectAnthropicStream(resp.Body)
+					} else {
+						mr, serr = core.CollectOpenAIStream(resp.Body)
+					}
+					if serr == nil {
+						respBytes, _ = json.Marshal(mr)
+						if blockedMsg := s.rails.checkResponse(respBytes); blockedMsg != "" {
+							writeAnthropicError(w, http.StatusBadRequest, "invalid_request_error", "blocked by guardrail: "+blockedMsg)
+							return
+						}
+						startSSEHeaders(fbw)
+						flush()
+						core.WriteSyntheticStream(fbw, flush, mr)
+						u = mr.Usage
+					}
 				case p.Type() == "openai" && isSSEContentType(ct):
 					u, serr = core.TranslateOpenAIStream(fbw, flush, resp.Body, tg.Model)
 				case p.Type() == "openai":
@@ -443,6 +469,7 @@ func (s *Server) handleMessages(w http.ResponseWriter, r *http.Request) {
 			}
 
 			rec.LatencyMs = time.Since(started).Milliseconds()
+			p.EndRequest(rec.LatencyMs)
 			if stream {
 				rec.TTFTMs = fbw.ttft(started)
 			}

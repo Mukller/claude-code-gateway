@@ -10,24 +10,32 @@ import (
 )
 
 type Config struct {
-	Server     Server      `yaml:"server"`
-	Auth       Auth        `yaml:"auth"`
-	Providers  []Provider  `yaml:"providers"`
-	Routing    Routing     `yaml:"routing"`
-	Retry      Retry       `yaml:"retry"`
-	Pricing    []PriceRule `yaml:"pricing"`
-	Logging    Logging     `yaml:"logging"`
-	RateLimit  int         `yaml:"rate_limit_rpm"`
-	Cache      Cache       `yaml:"cache"`
-	Webhooks   []Webhook   `yaml:"webhooks"`
-	Clients    []Client    `yaml:"clients"`
-	Guardrails Guardrails  `yaml:"guardrails"`
-	State      State       `yaml:"state"`
+	Server      Server      `yaml:"server"`
+	Auth        Auth        `yaml:"auth"`
+	Providers   []Provider  `yaml:"providers"`
+	Routing     Routing     `yaml:"routing"`
+	Retry       Retry       `yaml:"retry"`
+	Pricing     []PriceRule `yaml:"pricing"`
+	Logging     Logging     `yaml:"logging"`
+	RateLimit   int         `yaml:"rate_limit_rpm"`
+	Cache       Cache       `yaml:"cache"`
+	Webhooks    []Webhook   `yaml:"webhooks"`
+	Clients     []Client    `yaml:"clients"`
+	Guardrails  Guardrails  `yaml:"guardrails"`
+	State       State       `yaml:"state"`
+	PricingSync PricingSync `yaml:"pricing_sync"`
 }
 
 type State struct {
-	RedisURL string `yaml:"redis_url"`
-	Prefix   string `yaml:"prefix"`
+	RedisURL    string `yaml:"redis_url"`
+	PostgresURL string `yaml:"postgres_url"`
+	Prefix      string `yaml:"prefix"`
+}
+
+type PricingSync struct {
+	Enabled  bool          `yaml:"enabled"`
+	Interval time.Duration `yaml:"interval"`
+	Endpoint string        `yaml:"endpoint"`
 }
 
 type Client struct {
@@ -67,13 +75,16 @@ type Guardrails struct {
 }
 
 type ReqGuardrails struct {
-	MaxInputTokens  int64    `yaml:"max_input_tokens"`
-	BlockedPatterns []string `yaml:"blocked_patterns"`
-	DeniedTools     []string `yaml:"denied_tools"`
+	MaxInputTokens     int64    `yaml:"max_input_tokens"`
+	BlockedPatterns    []string `yaml:"blocked_patterns"`
+	DeniedTools        []string `yaml:"denied_tools"`
+	PIIPresets         []string `yaml:"pii_presets"`         // email, phone, card
+	InjectionDetection string   `yaml:"injection_detection"` // off | flag | block
 }
 
 type RespGuardrails struct {
 	BlockedPatterns []string `yaml:"blocked_patterns"`
+	ScanStreams     bool     `yaml:"scan_streams"`
 }
 
 type Server struct {
@@ -132,12 +143,13 @@ type ChainScenario struct {
 }
 
 type Rule struct {
-	Prefix      string            `yaml:"prefix"`
-	StripPrefix bool              `yaml:"strip_prefix"`
-	Chain       []string          `yaml:"chain"`
-	ModelMap    map[string]string `yaml:"model_map"`
-	Targets     []RouteTarget     `yaml:"targets"`
-	LoadBalance bool              `yaml:"load_balance"`
+	Prefix          string            `yaml:"prefix"`
+	StripPrefix     bool              `yaml:"strip_prefix"`
+	Chain           []string          `yaml:"chain"`
+	ModelMap        map[string]string `yaml:"model_map"`
+	Targets         []RouteTarget     `yaml:"targets"`
+	LoadBalance     bool              `yaml:"load_balance"`
+	BalanceStrategy string            `yaml:"balance_strategy"` // weighted | least_busy | latency
 }
 
 type RouteTarget struct {

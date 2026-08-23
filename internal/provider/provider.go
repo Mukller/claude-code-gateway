@@ -31,6 +31,25 @@ type Provider struct {
 
 	consecFails   int32
 	openUntilUnix int64
+	inflight      int32
+	lbMu          sync.Mutex
+	latEMA        float64
+}
+
+func (p *Provider) BeginRequest() { atomic.AddInt32(&p.inflight, 1) }
+
+func (p *Provider) EndRequest(latencyMs int64) {
+	atomic.AddInt32(&p.inflight, -1)
+	p.lbMu.Lock()
+	p.latEMA = p.latEMA*0.7 + float64(latencyMs)*0.3
+	p.lbMu.Unlock()
+}
+
+func (p *Provider) Inflight() int32 { return atomic.LoadInt32(&p.inflight) }
+func (p *Provider) Latency() float64 {
+	p.lbMu.Lock()
+	defer p.lbMu.Unlock()
+	return p.latEMA
 }
 
 func New(cfg config.Provider) *Provider {

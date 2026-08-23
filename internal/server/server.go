@@ -37,6 +37,7 @@ type Server struct {
 
 	storeBackend state.Store
 	cacheTTL     time.Duration
+	autoPrices   atomic.Pointer[pricing.Table]
 
 	started    time.Time
 	tokens     map[string]bool

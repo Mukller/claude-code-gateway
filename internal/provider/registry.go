@@ -30,6 +30,7 @@ type compiledRule struct {
 	mmap        map[string]string
 	targets     []Target
 	loadBalance bool
+	strategy    string
 }
 
 type Registry struct {
@@ -68,12 +69,17 @@ func (r *Registry) apply(routing *config.Routing, provCfgs []config.Provider) {
 	}
 	var rules []compiledRule
 	for _, rc := range routing.Rules {
+		strategy := rc.BalanceStrategy
+		if strategy == "" && rc.LoadBalance {
+			strategy = "weighted"
+		}
 		cr := compiledRule{
 			prefix:      rc.Prefix,
 			strip:       rc.StripPrefix,
 			chain:       rc.Chain,
 			mmap:        rc.ModelMap,
-			loadBalance: rc.LoadBalance,
+			loadBalance: strategy != "",
+			strategy:    strings.ToLower(strategy),
 		}
 		for _, t := range rc.Targets {
 			cr.targets = append(cr.targets, Target{Name: t.Provider, Model: t.Model})
@@ -219,7 +225,7 @@ func (r *Registry) matchRulesLocked(model string) ([]Target, string, bool) {
 				tg := make([]Target, len(ru.targets))
 				copy(tg, ru.targets)
 				if ru.loadBalance {
-					tg = r.weightedShuffleLocked(tg)
+					tg = r.orderByStrategyLocked(tg, ru.strategy)
 				}
 				return tg, tg[0].Model, true
 			}
@@ -235,7 +241,7 @@ func (r *Registry) matchRulesLocked(model string) ([]Target, string, bool) {
 				for _, n := range ru.chain {
 					tmp = append(tmp, Target{Name: n, Model: m})
 				}
-				return r.weightedShuffleLocked(tmp), m, true
+				return r.orderByStrategyLocked(tmp, ru.strategy), m, true
 			}
 			tg := make([]Target, 0, len(ru.chain))
 			for _, n := range ru.chain {
@@ -247,13 +253,50 @@ func (r *Registry) matchRulesLocked(model string) ([]Target, string, bool) {
 	return nil, "", false
 }
 
-func (r *Registry) weightedShuffleLocked(tg []Target) []Target {
+func (r *Registry) orderByStrategyLocked(tg []Target, strategy string) []Target {
 	out := make([]Target, len(tg))
 	copy(out, tg)
-	sort.SliceStable(out, func(i, j int) bool {
-		return weightedKey(r.weightOf(out[i].Name)) > weightedKey(r.weightOf(out[j].Name))
-	})
+	switch strategy {
+	case "least_busy":
+		sort.SliceStable(out, func(i, j int) bool {
+			pi, pj := r.providers[out[i].Name], r.providers[out[j].Name]
+			ii, ij := int32(0), int32(0)
+			if pi != nil {
+				ii = pi.Inflight()
+			}
+			if pj != nil {
+				ij = pj.Inflight()
+			}
+			if ii != ij {
+				return ii < ij
+			}
+			return r.weightOf(out[i].Name) > r.weightOf(out[j].Name)
+		})
+	case "latency":
+		sort.SliceStable(out, func(i, j int) bool {
+			pi, pj := r.providers[out[i].Name], r.providers[out[j].Name]
+			var li, lj float64
+			if pi != nil && pi.Latency() > 0 {
+				li = pi.Latency()
+			}
+			if pj != nil && pj.Latency() > 0 {
+				lj = pj.Latency()
+			}
+			if li != lj {
+				return li < lj
+			}
+			return r.weightOf(out[i].Name) > r.weightOf(out[j].Name)
+		})
+	default:
+		sort.SliceStable(out, func(i, j int) bool {
+			return weightedKey(r.weightOf(out[i].Name)) > weightedKey(r.weightOf(out[j].Name))
+		})
+	}
 	return out
+}
+
+func (r *Registry) weightedShuffleLocked(tg []Target) []Target {
+	return r.orderByStrategyLocked(tg, "weighted")
 }
 
 func weightedKey(w int) float64 {
