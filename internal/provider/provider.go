@@ -78,7 +78,34 @@ func New(cfg config.Provider) *Provider {
 		if cfg.AnthropicVersion == "" {
 			cfg.AnthropicVersion = "2023-06-01"
 		}
-	default:
+	case "antigravity":
+		if cfg.AntigravityAuthFile != "" {
+			home, _ := os.UserHomeDir()
+			agFile := strings.Replace(cfg.AntigravityAuthFile, "~", home, 1)
+			if data, err := os.ReadFile(agFile); err == nil {
+				var auth struct {
+					Google struct {
+						Access    string `json:"access"`
+						Refresh   string `json:"refresh"`
+						ProjectID string `json:"projectId"`
+					} `json:"google"`
+				}
+				if json.Unmarshal(data, &auth) == nil && auth.Google.Access != "" {
+					if len(cfg.Keys) == 0 {
+						cfg.Keys = []string{auth.Google.Access}
+					}
+					if cfg.BaseURL == "" {
+						cfg.BaseURL = agEndpointDaily
+					}
+					if cfg.ExtraHeaders == nil {
+						cfg.ExtraHeaders = map[string]string{}
+					}
+					cfg.ExtraHeaders["User-Agent"] = agUserAgent
+					cfg.ExtraHeaders["X-Goog-Api-Client"] = agAPIClient
+					cfg.ExtraHeaders["Client-Metadata"] = agClientMetadata
+				}
+			}
+		}
 		if cfg.AnthropicVersion == "" {
 			cfg.AnthropicVersion = "2023-06-01"
 		}

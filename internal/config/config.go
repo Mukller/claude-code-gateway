@@ -105,24 +105,25 @@ type Auth struct {
 }
 
 type Provider struct {
-	Name               string            `yaml:"name"`
-	Type               string            `yaml:"type"`
-	BaseURL            string            `yaml:"base_url"`
-	Keys               []string          `yaml:"keys"`
-	AuthStyle          string            `yaml:"auth_style"`
-	AnthropicVersion   string            `yaml:"anthropic_version"`
-	ExtraHeaders       map[string]string `yaml:"extra_headers"`
-	Timeout            time.Duration     `yaml:"timeout"`
-	DiscoverModels     bool              `yaml:"discover_models"`
-	RefreshInterval    time.Duration     `yaml:"refresh_interval"`
-	Models             []string          `yaml:"models"`
-	Transformers       []string          `yaml:"transformers"`
-	SendStreamOptions  bool              `yaml:"send_stream_options"`
-	Region             string            `yaml:"region"`
-	ServiceAccountJSON string            `yaml:"service_account_json"`
-	Weight             int               `yaml:"weight"`
-	KeyStrategy        string            `yaml:"key_strategy"` // round_robin | fill_first
-	ProbeInterval      time.Duration     `yaml:"probe_interval"`
+	Name                string            `yaml:"name"`
+	Type                string            `yaml:"type"`
+	BaseURL             string            `yaml:"base_url"`
+	Keys                []string          `yaml:"keys"`
+	AuthStyle           string            `yaml:"auth_style"`
+	AnthropicVersion    string            `yaml:"anthropic_version"`
+	ExtraHeaders        map[string]string `yaml:"extra_headers"`
+	Timeout             time.Duration     `yaml:"timeout"`
+	DiscoverModels      bool              `yaml:"discover_models"`
+	RefreshInterval     time.Duration     `yaml:"refresh_interval"`
+	Models              []string          `yaml:"models"`
+	Transformers        []string          `yaml:"transformers"`
+	SendStreamOptions   bool              `yaml:"send_stream_options"`
+	Region              string            `yaml:"region"`
+	ServiceAccountJSON  string            `yaml:"service_account_json"`
+	Weight              int               `yaml:"weight"`
+	KeyStrategy         string            `yaml:"key_strategy"` // round_robin | fill_first
+	ProbeInterval       time.Duration     `yaml:"probe_interval"`
+	AntigravityAuthFile string            `yaml:"antigravity_auth_file"`
 }
 
 type Routing struct {
@@ -297,7 +298,7 @@ func (c *Config) validate() error {
 		}
 		names[p.Name] = true
 		switch p.Type {
-		case "anthropic", "anthropic-compat", "openai", "bedrock", "vertex":
+		case "anthropic", "anthropic-compat", "openai", "bedrock", "vertex", "antigravity":
 		default:
 			return fmt.Errorf("provider %q: unknown type %q", p.Name, p.Type)
 		}
