@@ -1,22 +1,45 @@
-# Contributing Guide
+# Contributing
 
-Thanks for your interest in contributing to **claude-code-gateway**!
+## Development setup
 
-Please read the [CODE_OF_CONDUCT](CODE_OF_CONDUCT.md) first.
+```bash
+git clone https://github.com/Mukller/claude-code-gateway.git
+cd claude-code-gateway
+go build ./...
+go test ./...
+```
 
-## How to Contribute
+Requires Go 1.26+.
 
-1. Fork the repository
-2. Create a feature branch (git checkout -b feature/my-feature)
-3. Make your changes
-4. Test your changes
-5. Commit (git commit -m "feat: add my feature")
-6. Push and open a Pull Request
+## Before submitting a PR
 
-## Guidelines
+```bash
+gofmt -w .
+go vet ./...
+go test ./... -count=1
+```
 
-- Keep changes focused: one PR per feature/fix
-- Follow existing code style
-- Update documentation when behavior changes
+All three must pass. CI runs the same checks.
 
-Thank you!
+## Code style
+
+- No comments unless explaining a non-obvious invariant
+- Error wrapping with `fmt.Errorf("context: %w", err)`
+- Table-driven tests
+- `gofmt` formatting (CI enforces)
+
+## Adding a provider
+
+1. Add the type string to `internal/config/config.go` validation
+2. Add initialization in `internal/provider/provider.go` `New()` switch
+3. Add payload building in `internal/server/handlers.go` `buildPayload()`
+4. Add config example to `config.example.yaml`
+5. Add test coverage
+
+## Adding a feature
+
+1. Write the test first
+2. Implement
+3. Update `README.md` features section
+4. Update `CHANGELOG.md`
+5. Update `config.example.yaml` if new config options
