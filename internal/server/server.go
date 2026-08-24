@@ -6,6 +6,7 @@ import (
 	"net/http"
 	"runtime/debug"
 	"strings"
+	"sync"
 	"sync/atomic"
 	"time"
 
@@ -38,6 +39,7 @@ type Server struct {
 	storeBackend state.Store
 	cacheTTL     time.Duration
 	autoPrices   atomic.Pointer[pricing.Table]
+	tokensMu     sync.RWMutex
 
 	started    time.Time
 	tokens     map[string]bool
@@ -98,6 +100,7 @@ func (s *Server) Handler() http.Handler {
 	mux.HandleFunc("/admin/stats", s.requireAuth(s.handleAdminStats))
 	mux.HandleFunc("/admin/logs", s.requireAuth(s.handleAdminLogs))
 	mux.HandleFunc("/admin/tokens", s.requireAuth(s.handleAdminTokens))
+	mux.HandleFunc("/admin/tokens/generate", s.requireAuth(s.handleTokenGenerate))
 	mux.HandleFunc("/admin/tokens/update", s.requireAuth(s.handleAdminTokensUpdate))
 	mux.HandleFunc("/admin/config", s.requireAuth(s.handleAdminConfig))
 	mux.HandleFunc("/admin/keys", s.requireAuth(s.handleAdminKeys))

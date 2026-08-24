@@ -268,6 +268,19 @@ func (b *budgets) updateLimitByName(name string, limit float64) bool {
 	return false
 }
 
+func (b *budgets) addClientRuntime(name, token string, budget float64, period string, models []string, tpm int64) {
+	b.mu.Lock()
+	defer b.mu.Unlock()
+	limit := budget
+	if limit <= 0 {
+		limit = -1
+	}
+	b.info[token] = clientInfo{
+		Name: name, Limit: limit, Period: period,
+		AllowedModels: models, TPM: tpm,
+	}
+}
+
 type updateBudgetReq struct {
 	Name      string  `json:"name"`
 	BudgetUSD float64 `json:"budget_usd"`
