@@ -91,6 +91,7 @@ func (s *Server) Handler() http.Handler {
 	mux.HandleFunc("/v1/messages/count_tokens", s.handleCountTokens)
 	mux.HandleFunc("/v1/models", s.handleModels)
 	mux.HandleFunc("/healthz", s.handleHealth)
+	mux.HandleFunc("/openapi.json", s.handleOpenAPI)
 	mux.HandleFunc("/metrics", s.requireAuth(s.handleMetrics))
 	mux.HandleFunc("/admin/dashboard", s.handleDashboard)
 	mux.HandleFunc("/mcp", s.requireAuth(s.handleMCP))
