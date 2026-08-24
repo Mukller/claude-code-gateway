@@ -1,307 +1,414 @@
-<div align="center">
-
-[English](README_EN.md) • **Русский**
-
-</div>
-
 # claude-code-gateway
 
-<p align="center">
-  <a href="https://github.com/Mukller">
-    <img src="https://img.shields.io/badge/Anton%20Petnitsky-Developer-0d1117?style=for-the-badge&logo=github&logoColor=white&labelColor=0d1117&color=58a6ff" alt="Anton Petnitsky" />
-  </a>
-</p>
+[![Go](https://img.shields.io/badge/Go-1.26-00ADD8?style=flat-square&logo=go)](https://go.dev)
+[![Release](https://img.shields.io/github/v/release/Mukller/claude-code-gateway?style=flat-square&color=blue)](https://github.com/Mukller/claude-code-gateway/releases)
+[![Tests](https://img.shields.io/badge/tests-90%2B-green?style=flat-square)](https://github.com/Mukller/claude-code-gateway/actions)
+[![Docker](https://img.shields.io/badge/docker-ghcr-blue?style=flat-square&logo=docker)](https://ghcr.io/mukller/claude-code-gateway)
+[![License](https://img.shields.io/badge/license-MIT-green?style=flat-square)](LICENSE)
 
-Лёгкий гейтвей на Go для **Claude Code**: единая точка входа в стиле Anthropic Messages API с
-мультипровайдером, ротацией ключей, фолбэком между провайдерами, логами и подсчётом стоимости.
-Идея и набор фич вдохновлены [OmniRoute](https://github.com/diegosouzapw/OmniRoute), реализация — своя,
-только stdlib + yaml.
+Self-hosted AI gateway in pure Go for **Claude Code** and any OpenAI/Anthropic-compatible client. One binary, zero heavy dependencies, multi-provider routing with key rotation, fallbacks, budgets, semantic cache, guardrails, and an MCP control surface.
 
-## Возможности
+> Inspired by the best: [OmniRoute](https://github.com/diegosouzapw/OmniRoute) · [claude-code-router](https://github.com/musistudio/claude-code-router) · [LiteLLM](https://github.com/BerriAI/litellm) · [one-api](https://github.com/songquanpeng/one-api) · [Bifrost](https://github.com/maximhq/bifrost) · [Portkey](https://github.com/Portkey-AI/gateway) — all credited in [Credits](#credits).
 
-- **Anthropic-совместимый API**: `/v1/messages` (streaming SSE + non-streaming), `/v1/messages/count_tokens`, `/v1/models`
-- **Типы провайдеров**:
-  - `anthropic` — прямой api.anthropic.com (passthrough)
-  - `anthropic-compat` — любой Anthropic-совместимый прокси (свой base_url, bearer/x-api-key)
-  - `openai` — OpenAI-совместимые бэкенды (9router, OpenRouter, DeepSeek, GLM, Kimi, Ollama...) с полным
-    переводом протокола туда-обратно, включая потоковый SSE; опция `send_stream_options` для точного usage
-  - `bedrock` — AWS Bedrock (InvokeModel / invoke-with-response-stream): SigV4-подпись из stdlib,
-    декодирование бинарного event-stream, ключ формата `AKID:SECRET[:SESSION_TOKEN]`
-  - `vertex` — Google Vertex AI (`rawPredict`/`streamRawPredict`, нативный Anthropic-формат):
-    Express API-key (`?key=`), bearer-токен, или **сервис-аккаунт** (`auth_style: sa` +
-    `service_account_json`: JSON ключа или путь к файлу — JWT подписывается на месте,
-    OAuth-токен кешируется и рефрешится автоматически)
-- **Веб-дашборд** `/admin/dashboard`: карточки за сегодня, разбивка по провайдерам/моделям,
-  лента последних запросов с ошибками, автообновление
-- **Ротация ключей**: несколько ключей на провайдера, round-robin, cooldown при 401/403/429/5xx
-  с экспоненциальным backoff + уважение `Retry-After` от upstream
-- **Фолбэк-цепочки**: модель → список целей; при сбое ключа/провайдера запрос идёт дальше
-- **Маршрутизация по префиксу**: правила вида `anthropic/* → provider anthropic`
-- **Model discovery**: список моделей подтягивается с upstream (`/v1/models`) автоматически
-- **claude/ алиасы**: дублирует модели под `claude/<id>`, чтобы они появлялись в родном пикере моделей Claude Code
-  (`CLAUDE_CODE_ENABLE_GATEWAY_MODEL_DISCOVERY=1`)
-- **Логи и стоимость**: каждая запись — токены, latency, статус, оценка стоимости в USD; JSONL-файл + агрегаты
-- **Кэш ответов (opt-in)**: одинаковые non-stream запросы отдаются из LRU+TTL кэша
-  (`cache.enabled: true`) — для реплеев и оценок; в логе такие записи помечены `"cached":true`
-- **Стратегии балансировки** (LiteLLM): `balance_strategy: weighted | least_busy | latency`
-  в правилах — weighted-random по весам, по минимуму активных запросов или по скользящей
-  латентности (EMA) провайдера
-- **Автосинк цен** (new-api): `pricing_sync` подтягивает цены всех моделей с OpenRouter
-  раз в интервал; явные правила из `pricing:` всегда приоритетнее
-- **Guardrails+** (Portkey): PII-пресеты (`pii_presets: [email, phone, card]` — маскируются
-  в исходящих промптах), детект prompt-injection (`injection_detection: block|flag|off`),
-  опциональный буферизованный скан стримов (`scan_streams: true`)
-- **Postgres-persistence** (LiteLLM): `state.postgres_url` — бюджеты и лимиты переживают
-  рестарт и синхронны между репликами (приоритет над Redis)
-- **Распределённое состояние** (one-api/LiteLLM multi-replica style): `state.redis_url` —
-  RPM/TPM-счётчики, бюджеты и кэш ответов живут в Redis (свой RESP2-клиент на stdlib,
-  ноль зависимостей); без Redis всё работает локально in-memory
-- **Редактор config.yaml**: просмотр/правка прямо из дашборда с валидацией перед применением
-  (`GET/POST /admin/config/yaml`) и откатом через `POST /admin/config/rollback` (+`.bak`)
-- **Семантический кэш** (как в Bifrost): опционально через embeddings-endpoint — похожие
-  промпты получают закэшированный ответ (косинусная близость, порог настраивается);
-  попадания помечены `[sem]` в дашборде
-- **Guardrails** (Portkey-style): блок-паттерны запроса и ответа (regex), лимит входных
-  токенов, запретительный список тулов — нарушители получают `400 blocked by guardrail`
-- **Управление клиентами рантайм** (one-api style): правка бюджета клиента через API/дашборд
-  без рестарта (`POST /admin/tokens/update`), снапшот конфига в `/admin/config`
-- **MCP-сервер** (как в OmniRoute): управляй гейтвеем из Claude — статистика, логи, модели,
-  бюджеты, hot-reload и оценка стоимости. HTTP-транспорт `/mcp` или stdio (`-mcp`)
-- **Трансформеры запросов** (как transformers в CCR): `max_tokens_cap`, `set:key=value`,
-  `reasoning_effort`, `drop_keys`, `system_prefix` — на уровне провайдера
-- **Комбо-модели**: один алиас → цепочка разных моделей с фолбэком
-  (`combo/fast` → glm-flash, затем gpt-oss)
-- **Сценарная маршрутизация** (идея из claude-code-router): отдельные цепочки для
-  длинного контекста (`long_context.threshold_tokens`), запросов с картинками (`image`)
-  и thinking-запросов (`thinking`) — например, тяжёлый контекст уходит на модель с большим окном
-- **Бюджеты и лимиты на клиентов** (идея из LiteLLM virtual keys / uni-api): именованные токены
-  с лимитом USD на период, **белым списком моделей** (`allowed_models`) и **TPM-потолком**
-  (оценка токенов до отправки); при исчерпании — `429`, чужая модель — `403`;
-  `/admin/tokens` показывает расход и дату сброса
-- **Веса и load balancing** (one-api): `weight` у провайдера + `load_balance: true` в правиле —
-  взвешенное распределение вместо жёсткого failover-порядка
-- **Circuit breaker** (one-api/gpt-load): 5 ошибок подряд — провайдер пропускается на 2 минуты,
-  ключи при этом продолжают ротироваться независимо
-- **Health-пробы**: периодический опрос `/v1/models` апстрима (`probe_interval`),
-  статус/латентность видны в `/admin/keys`
-- **TTFT** (как в Helicone): время до первого байта стрима в каждом логе
-- **Экспорт CSV** (`/admin/export.csv`) и статистика по каждому ключу пула (`/admin/keys`)
-- **Rate limit** (на токен клиента), admin-API, `/metrics` в формате Prometheus,
-  healthcheck (`/healthz` + флаг `-healthcheck` для docker/compose)
-- **Вебхуки**: push событий `usage`/`error` на твой URL с HMAC-подписью (`X-CCG-Signature`)
-- **Лаунчер**: `gateway -launch -- "твои флаги claude"` — поднимает гейтвей и стартует Claude Code
-  с уже прописанными env
+## Features
 
-## Быстрый старт
+**Core**
+- **6 provider types**: `anthropic`, `anthropic-compat`, `openai`, `bedrock` (SigV4 + event-stream), `vertex` (api-key / bearer / service-account), `antigravity` (free Claude Opus 4.5 via Google OAuth)
+- Full **Anthropic ↔ OpenAI protocol translation**, both directions, including streaming SSE
+- **Key rotation**: round-robin or fill-first, cooldown with exponential backoff, `Retry-After` respect
+- **Fallback chains** + circuit breaker (5 consecutive failures → 2 min pause)
+- **Load balancing**: `weighted` / `least_busy` / `latency` (EMA) strategies
+
+**Routing**
+- **Scenario routing** (from claude-code-router): `long_context` / `image` / `thinking` — route to different chains based on request content
+- **Combo models**: one alias → chain of different models with fallback
+- **Session-sticky routing** by `metadata.user_id`
+- Prefix-based rules with model mapping and stripping
+
+**Client management**
+- **Virtual keys** (LiteLLM-style): named clients with USD budgets (daily/weekly/monthly), `allowed_models` glob patterns, TPM limits
+- **Per-request headers** (Cloudflare AI Gateway-style): `x-ccg-skip-cache`, `x-ccg-cache-ttl`, `x-ccg-cache-key`, `x-ccg-collect-log`, `x-ccg-max-attempts`, `x-ccg-metadata`
+
+**Observability**
+- Web dashboard: charts (24h + 14d), per-provider/model breakdowns, live request feed, YAML config editor with validation + rollback
+- Prometheus `/metrics`: requests, tokens, cost, latency histogram, per-provider/model
+- Usage webhooks with HMAC signatures
+- TTFT (time-to-first-byte) per streamed request
+- CSV export
+
+**Security**
+- Guardrails: block/redact regex patterns on request and response, PII presets (`email`, `phone`, `card`), prompt-injection detection, denied tools, streaming scan
+- Response cache: exact + **semantic** (embeddings-based), per-request TTL override
+- Rate limiting: RPM + TPM per client token
+- Distributed state: Redis or Postgres for multi-replica deployments
+
+**Extensibility**
+- **MCP server** (HTTP + stdio): manage the gateway from Claude — stats, logs, models, budgets, reload, cost estimation
+- **Request transformers**: `max_tokens_cap`, `set:key=value`, `reasoning_effort`, `drop_keys`, `system_prefix`
+- **Price auto-sync** from OpenRouter API
+- **Hot config reload** (`POST /admin/reload`) — no restart needed
+- YAML config editor with validation + backup + rollback
+
+## Quick start
 
 ```bash
-cp .env.example .env        # вставь NINE_ROUTER_KEY и свои токены
-cp config.example.yaml config.yaml   # при необходимости поправь провайдеров
-
+git clone https://github.com/Mukller/claude-code-gateway.git
+cd claude-code-gateway
+cp .env.example .env   # add your provider keys
 docker compose up -d --build
-# или локально:
-go run ./cmd/gateway -config config.yaml
 ```
 
-## Подключение Claude Code
-
-Claude Code указывают на гейтвей переменными окружения (**без** `/v1` в base URL):
+Point Claude Code at the gateway:
 
 ```bash
 export ANTHROPIC_BASE_URL=http://localhost:8090
-export ANTHROPIC_AUTH_TOKEN=ccg-local-dev-token          # GATEWAY_TOKEN из .env
-export CLAUDE_CODE_ENABLE_GATEWAY_MODEL_DISCOVERY=1      # модели из /v1/models в пикере /model
+export ANTHROPIC_AUTH_TOKEN=ccg-local-dev-token
+export CLAUDE_CODE_ENABLE_GATEWAY_MODEL_DISCOVERY=1
 claude
 ```
 
-Модели без префикса `claude*` не показываются в нативном пикере Claude Code, но доступны через
-алиасы `claude/<id>` (включены по умолчанию, см. `routing.alias_claude_prefix`) либо через
-`ANTHROPIC_MODEL=<id>`.
+Or use a pre-built binary:
 
-## Конфигурация
+```bash
+# Download from Releases
+chmod +x cc-gateway-linux-amd64
+./cc-gateway-linux-amd64 -config config.yaml
+```
 
-Все строковые значения поддерживают `${VAR}` и `${VAR:-default}` (подстановка из окружения).
+Or Docker:
+
+```bash
+docker run -d -p 8090:8090 \
+  -v ./config.yaml:/app/config.yaml:ro \
+  -v ./data:/app/data \
+  -e NINE_ROUTER_KEY=sk-... \
+  ghcr.io/mukller/claude-code-gateway:latest
+```
+
+## Provider examples
+
+<details>
+<summary>Anthropic (direct)</summary>
+
+```yaml
+providers:
+  - name: anthropic
+    type: anthropic
+    base_url: "https://api.anthropic.com"
+    keys: ["${ANTHROPIC_API_KEY}"]
+```
+</details>
+
+<details>
+<summary>OpenRouter</summary>
+
+```yaml
+providers:
+  - name: openrouter
+    type: openai
+    base_url: "https://openrouter.ai/api/v1"
+    keys: ["${OPENROUTER_KEY}"]
+    discover_models: true
+```
+</details>
+
+<details>
+<summary>DeepSeek</summary>
+
+```yaml
+providers:
+  - name: deepseek
+    type: openai
+    base_url: "https://api.deepseek.com/v1"
+    keys: ["${DEEPSEEK_KEY}"]
+    models:
+      - deepseek-chat
+      - deepseek-reasoner
+```
+</details>
+
+<details>
+<summary>Groq</summary>
+
+```yaml
+providers:
+  - name: groq
+    type: openai
+    base_url: "https://api.groq.com/openai/v1"
+    keys: ["${GROQ_KEY}"]
+    discover_models: true
+```
+</details>
+
+<details>
+<summary>Mistral</summary>
+
+```yaml
+providers:
+  - name: mistral
+    type: openai
+    base_url: "https://api.mistral.ai/v1"
+    keys: ["${MISTRAL_KEY}"]
+    discover_models: true
+```
+</details>
+
+<details>
+<summary>Together AI</summary>
+
+```yaml
+providers:
+  - name: together
+    type: openai
+    base_url: "https://api.together.xyz/v1"
+    keys: ["${TOGETHER_KEY}"]
+    discover_models: true
+```
+</details>
+
+<details>
+<summary>xAI (Grok)</summary>
+
+```yaml
+providers:
+  - name: xai
+    type: openai
+    base_url: "https://api.x.ai/v1"
+    keys: ["${XAI_KEY}"]
+```
+</details>
+
+<details>
+<summary>Cerebras</summary>
+
+```yaml
+providers:
+  - name: cerebras
+    type: openai
+    base_url: "https://api.cerebras.ai/v1"
+    keys: ["${CEREBRAS_KEY}"]
+```
+</details>
+
+<details>
+<summary>Fireworks AI</summary>
+
+```yaml
+providers:
+  - name: fireworks
+    type: openai
+    base_url: "https://api.fireworks.ai/inference/v1"
+    keys: ["${FIREWORKS_KEY}"]
+```
+</details>
+
+<details>
+<summary>Ollama (local)</summary>
+
+```yaml
+providers:
+  - name: ollama
+    type: openai
+    base_url: "http://localhost:11434/v1"
+    keys: ["ollama"]
+    models:
+      - llama3:70b
+      - codellama:34b
+```
+</details>
+
+<details>
+<summary>AWS Bedrock</summary>
+
+```yaml
+providers:
+  - name: bedrock
+    type: bedrock
+    region: us-east-1
+    keys: ["${AWS_ACCESS_KEY_ID}:${AWS_SECRET_ACCESS_KEY}"]
+```
+</details>
+
+<details>
+<summary>Google Vertex AI</summary>
+
+```yaml
+providers:
+  - name: vertex
+    type: vertex
+    auth_style: api-key
+    keys: ["${VERTEX_API_KEY}"]
+```
+</details>
+
+<details>
+<summary>Antigravity (free Claude Opus 4.5)</summary>
+
+```yaml
+providers:
+  - name: antigravity
+    type: antigravity
+    antigravity_auth_file: "~/.local/share/opencode/auth.json"
+```
+
+Requires `opencode auth login` → Google → Antigravity (one-time).
+</details>
+
+## Configuration
+
+<details>
+<summary>Full config example</summary>
 
 ```yaml
 server:
   listen: ":8090"
+  keepalive_seconds: 15
 
 auth:
-  tokens: ["${GATEWAY_TOKEN}"]     # чем клиент представляется гейтвею
+  require_auth: true
+  tokens:
+    - "${GATEWAY_TOKEN}"
   admin_token: "${GATEWAY_ADMIN_TOKEN}"
-  allow_anon: false                # true = пускать всех (только для локальных тестов)
 
-rate_limit_rpm: 0                  # 0 = выключен
+clients:
+  - name: anton
+    token: "${GATEWAY_TOKEN}"
+  - name: teammate
+    token: "${TEAM_TOKEN}"
+    budget_usd: 50
+    budget_period: monthly
+    allowed_models: ["glm*", "deepseek*"]
+    tpm: 200000
 
 providers:
-  - name: nine-router              # любое имя, на него ссылаются chain/rules
-    type: openai                   # anthropic | anthropic-compat | openai
-    base_url: "https://9router.kitory.lol/v1"
-    keys: ["${NINE_ROUTER_KEY}"]   # сколько угодно ключей — ротация включится сама
-    discover_models: true          # тянуть каталог моделей с upstream
-    refresh_interval: 15m
-    timeout: 300s
+  - name: anthropic
+    type: anthropic
+    base_url: "https://api.anthropic.com"
+    keys: ["${ANTHROPIC_API_KEY}"]
+
+  - name: openrouter
+    type: openai
+    base_url: "https://openrouter.ai/api/v1"
+    keys: ["${OPENROUTER_KEY}"]
+    discover_models: true
+    weight: 3
 
 routing:
   alias_claude_prefix: true
-  default_chain: [nine-router]     # куда идут все неразобранные модели
+  default_chain: [anthropic, openrouter]
   rules:
-    - prefix: "anthropic/"         # model "anthropic/claude-*" -> провайдер anthropic
+    - prefix: "combo/fast"
+      targets:
+        - { provider: openrouter, model: "meta-llama/llama-4-scout" }
+        - { provider: anthropic, model: "claude-haiku-4-5" }
+    - prefix: "anthropic/"
       strip_prefix: true
       chain: [anthropic]
+  scenarios:
+    long_context:
+      threshold_tokens: 80000
+      chain: [anthropic]
+    image:
+      chain: [anthropic]
 
-pricing:                           # USD за 1M токенов; pattern = glob
-  - pattern: "claude-sonnet*"
-    input_per_mtok: 3.0
-    output_per_mtok: 15.0
-    cache_read_per_mtok: 0.3
-    cache_write_per_mtok: 3.75
+cache:
+  enabled: true
+  ttl: 30m
+
+guardrails:
+  request:
+    pii_presets: [email]
+    injection_detection: block
+
+pricing_sync:
+  enabled: true
+  interval: 6h
+
+state:
+  redis_url: "redis://localhost:6379"
 ```
+</details>
 
-### Поведение ретраев
+## API endpoints
 
-| Статус | Действие |
+| Endpoint | Description |
 |---|---|
-| 401/403 | ключ в cooldown 10 минут, пробуем следующий ключ/провайдера |
-| 408/409/429/500/502/503/504/529 | cooldown с экспон. backoff (10s..5m), пробуем дальше |
-| прочие 4xx | ошибка отдаётся клиенту как есть (фатально) |
-| сеть | то же, что soft-fail |
+| `POST /v1/messages` | Anthropic Messages API (streaming + non-streaming) |
+| `POST /v1/messages/count_tokens` | Token estimation |
+| `GET /v1/models` | Model catalog (`?format=openai` for OpenAI shape) |
+| `GET /healthz` | Health check |
+| `GET /metrics` | Prometheus metrics |
+| `POST /mcp` | MCP server (HTTP transport) |
+| `GET /admin/dashboard` | Web dashboard |
+| `GET /admin/stats` | Usage statistics |
+| `GET /admin/logs?limit=N` | Recent request log |
+| `GET /admin/tokens` | Client budgets and spend |
+| `GET /admin/keys` | Provider key pool status |
+| `GET /admin/config` | Sanitized config snapshot |
+| `GET /admin/config/yaml` | Raw config.yaml |
+| `POST /admin/config/yaml` | Update config (validated + backed up) |
+| `POST /admin/config/rollback` | Rollback to previous config |
+| `POST /admin/reload` | Hot reload providers/routing/pricing |
+| `POST /admin/flush-cache` | Clear response cache |
+| `GET /admin/export.csv` | Export usage log as CSV |
 
-Бюджет попыток на запрос: `retry.max_attempts` (по умолчанию 8).
+## MCP server
 
-## Админка и наблюдение
-
-Дашборд: **http://localhost:8090/admin/dashboard** — введи `GATEWAY_TOKEN` или
-`GATEWAY_ADMIN_TOKEN` (сохраняется в localStorage, автообновление 5с). Внутри:
-карточки за сегодня, графики за 24ч и 14 дней (UTC), таблицы по провайдерам/моделям,
-лента последних запросов.
-
-Горячая перезагрузка (меняешь `config.yaml` — провайдеры/ключи/роутинг/цены применяются без рестарта):
-
-```bash
-curl -X POST -H "x-api-key: ccg-admin-token" http://localhost:8090/admin/reload
-```
-
-Метрики для Prometheus (токен можно передать заголовком или `?token=`):
-
-```bash
-curl -H "x-api-key: ccg-admin-token" http://localhost:8090/metrics
-```
-
-Вебхуки:
-
-```yaml
-webhooks:
-  - url: "https://hooks.example.com/ccg"
-    secret: "${WEBHOOK_SECRET}"     # X-CCG-Signature: sha256=hex(hmac(secret, body))
-    events: [usage, error]          # пусто = все
-    timeout: 5s
-```
-
-## MCP-сервер
-
-Гейтвей сам выступает MCP-сервером — Claude (Desktop / Code) получает инструменты
-`gateway_stats`, `gateway_logs`, `gateway_models`, `gateway_providers`, `gateway_tokens`,
-`gateway_reload` и `estimate_cost`.
-
-HTTP-транспорт:
+The gateway exposes itself as an MCP server — Claude can manage it natively:
 
 ```bash
+# HTTP transport
 claude mcp add --transport http ccg http://localhost:8090/mcp --header "x-api-key: ccg-admin-token"
-```
 
-Stdio-транспорт (процесс подключается к гейтвею локально):
-
-```bash
+# stdio transport
 claude mcp add ccg -- ./bin/gateway -config config.yaml -mcp
 ```
 
-## Трансформеры и комбо
+Tools: `gateway_stats`, `gateway_logs`, `gateway_models`, `gateway_providers`, `gateway_tokens`, `gateway_reload`, `estimate_cost`.
 
-```yaml
-providers:
-  - name: nine-router
-    type: openai
-    # ...
-    transformers:
-      - "max_tokens_cap:16384"
-      - "reasoning_effort:high"
-      - "system_prefix:Отвечай по-русски."
+## Architecture
 
-routing:
-  rules:
-    - prefix: "combo/fast"       # модель combo/fast в Claude Code
-      targets:
-        - { provider: nine-router, model: ag/gemini-3.7-flash-low }
-        - { provider: nine-router, model: ag/gpt-oss-120b-medium }
 ```
+cmd/gateway             entry point + claude launcher
+internal/core           Anthropic/OpenAI types, protocol translation (req/resp/SSE)
+internal/provider       key pool, request execution, routing registry, SigV4, event-stream
+internal/server         HTTP handlers, dashboard, MCP, metrics, guardrails
+internal/cache          LRU+TTL exact cache
+internal/logstore       JSONL usage log + aggregates
+internal/pricing        glob pricing table, cost calculation
+internal/ratelimit      per-client RPM/TPM limiter
+internal/state          Redis/Postgres/memory state backends
+internal/config         YAML + env expansion
+```
+
+## Development
 
 ```bash
-curl http://localhost:8090/healthz
-curl -H "x-api-key: ccg-admin-token" http://localhost:8090/admin/stats
-curl -H "x-api-key: ccg-admin-token" "http://localhost:8090/admin/logs?limit=20"
-tail -f data/usage.jsonl
+make test          # go test ./...
+make vet           # go vet ./...
+make fmt           # gofmt -w .
+make run           # local start
+make docker-up     # build + run in docker
 ```
-
-Лаунчер (поднимает гейтвей и сразу запускает Claude Code с нужными env):
-
-```bash
-go run ./cmd/gateway -launch -config config.yaml -- --resume
-```
-
-Стоимость считается по таблице `pricing` (первый совпавший паттерн). Модели вне таблицы — стоимость 0,
-токены всё равно логируются. Правь цены под свой стек.
-
-## 9router
-
-В конфиге из коробки подключён 9router (`nine-router`). Он OpenAI-совместимый: модели подтягиваются
-автоматически после первого запуска. Если каталог пуст или провайдер ожидает Anthropic-протокол —
-переключи тип на `anthropic-compat` (пример закомментирован в `config.example.yaml`).
-
-## Разработка
-
-```bash
-make test      # go test ./...
-make vet       # go vet ./...
-make run       # локальный запуск
-make docker-up # сборка+запуск в docker
-```
-
-Структура:
-
-```
-cmd/gateway             точка входа + лаунчер claude
-internal/core           типы Anthropic/OpenAI, трансляция протоколов (req/resp/SSE), сборщики стримов
-internal/provider       пул ключей, исполнение запросов, роутинг; SigV4 и event-stream для Bedrock
-internal/server         HTTP: /v1/messages, /v1/models, админка, дашборд, /metrics; e2e-тесты
-internal/cache          LRU+TTL кэш ответов
-internal/logstore       JSONL-лог + агрегаты (день/час/модель/провайдер)
-internal/pricing        glob-таблица цен, расчёт стоимости
-internal/ratelimit      лимитер RPM на токен
-internal/config         YAML + ${ENV}
-```
-
-Тесты покрывают трансляцию протоколов, SigV4 (вектор AWS), event-stream декодер, GCP OAuth-флоу,
-кэш, вебхуки и сквозные сценарии через фейковые upstream: ротация ключей, фолбэк провайдеров,
-rate limit, стриминг.
-
-## Roadmap
-
-- Дедупликация вебхуков (retry с backoff)
-- Кэширование стримовых ответов (идемпотентность спорна — пока не делаем)
 
 ## Credits
 
-Идеи честно украдены у лучших в классе:
+Ideas and inspiration from the best in class:
 
-- [claude-code-router](https://github.com/musistudio/claude-code-router) — сценарная маршрутизация
-  (longContext / image / think), трансформеры запросов, алиасы для пикера моделей
-- [LiteLLM](https://github.com/BerriAI/litellm) — виртуальные ключи: бюджеты, allowed_models, TPM
-- [OmniRoute](https://github.com/diegosouzapw/OmniRoute) — MCP-сервер, фолбэк-цепочки, model discovery, дашборд
-- [one-api / new-api](https://github.com/songquanpeng/one-api) — веса каналов, circuit breaker,
-  CSV-экспорт биллинга, рантайм-менеджмент ключей
-- [gpt-load](https://github.com/tbphp/gpt-load) — health-пробы пулов ключей
-- [uni-api](https://github.com/yym68686/uni-api) — per-key rate limits в YAML
-- [Helicone](https://github.com/Helicone/helicone) — TTFT-метрика
-- [Bifrost](https://github.com/maximhq/bifrost) — семантический кэш на эмбеддингах
-- [Portkey Gateway](https://github.com/Portkey-AI/gateway) — guardrails на запрос и ответ
+| Project | What we borrowed |
+|---|---|
+| [claude-code-router](https://github.com/musistudio/claude-code-router) | Scenario routing, transformers, model aliases |
+| [LiteLLM](https://github.com/BerriAI/litellm) | Virtual keys, budgets, allowed_models, TPM |
+| [OmniRoute](https://github.com/diegosouzapw/OmniRoute) | MCP server, fallback chains, model discovery, dashboard |
+| [one-api / new-api](https://github.com/songquanpeng/one-api) | Channel weights, circuit breaker, CSV export, runtime key management |
+| [gpt-load](https://github.com/tbphp/gpt-load) | Key pool health probes |
+| [uni-api](https://github.com/yym68686/uni-api) | Per-key rate limits in YAML |
+| [Helicone](https://github.com/Helicone/helicone) | TTFT metric |
+| [Bifrost](https://github.com/maximhq/bifrost) | Semantic cache via embeddings |
+| [Portkey Gateway](https://github.com/Portkey-AI/gateway) | Guardrails on request and response |
+| [Cloudflare AI Gateway](https://developers.cloudflare.com/ai-gateway/) | Per-request headers, cache control |
+| [CLIProxyAPI](https://github.com/router-for-me/CLIProxyAPI) | SSE keep-alive, session affinity, fill-first |
+
+## License
+
+MIT

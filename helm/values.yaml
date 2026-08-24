@@ -1,0 +1,54 @@
+replicaCount: 1
+
+image:
+  repository: ghcr.io/mukller/claude-code-gateway
+  tag: latest
+  pullPolicy: IfNotPresent
+
+service:
+  type: ClusterIP
+  port: 8090
+
+resources:
+  requests:
+    memory: "64Mi"
+    cpu: "100m"
+  limits:
+    memory: "256Mi"
+    cpu: "500m"
+
+env:
+  GATEWAY_TOKEN: "change-me"
+  GATEWAY_ADMIN_TOKEN: "change-me-admin"
+  NINE_ROUTER_KEY: ""
+  ANTHROPIC_API_KEY: ""
+
+config: |
+  server:
+    listen: ":8090"
+  auth:
+    tokens: ["${GATEWAY_TOKEN}"]
+    admin_token: "${GATEWAY_ADMIN_TOKEN}"
+  providers:
+    - name: anthropic
+      type: anthropic
+      base_url: "https://api.anthropic.com"
+      keys: ["${ANTHROPIC_API_KEY}"]
+  routing:
+    default_chain: [anthropic]
+  logging:
+    file: "/app/data/usage.jsonl"
+
+livenessProbe:
+  httpGet:
+    path: /healthz
+    port: 8090
+  initialDelaySeconds: 5
+  periodSeconds: 30
+
+readinessProbe:
+  httpGet:
+    path: /healthz
+    port: 8090
+  initialDelaySeconds: 3
+  periodSeconds: 10

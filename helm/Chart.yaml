@@ -1,0 +1,6 @@
+apiVersion: v2
+name: cc-gateway
+description: Self-hosted AI gateway for Claude Code
+type: application
+version: 1.0.0
+appVersion: "1.0.0"
