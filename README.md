@@ -96,7 +96,9 @@ The gateway exposes **both** Anthropic and OpenAI protocols simultaneously:
 | OpenCode | OpenAI | `http://localhost:8090/v1` |
 | Cursor | OpenAI | `http://localhost:8090/v1` |
 | Aider | OpenAI | `http://localhost:8090/v1` |
+| Zed | OpenAI | `http://localhost:8090/v1` |
 | Continue | OpenAI | `http://localhost:8090/v1` |
+| Windsurf | OpenAI | `http://localhost:8090/v1` |
 | Any OpenAI SDK | OpenAI | `http://localhost:8090/v1` |
 
 **OpenCode config** (`~/.config/opencode/config.json`):
@@ -105,11 +107,20 @@ The gateway exposes **both** Anthropic and OpenAI protocols simultaneously:
   "provider": {
     "gateway": {
       "apiKey": "ccg-local-dev-token",
-      "baseUrl": "http://localhost:8090/v1"
+      "baseUrl": "http://localhost:8090/v1",
+      "models": {
+        "claude-sonnet-4-5": { "name": "Sonnet 4.5 (gateway)" },
+        "claude-opus-4-5": { "name": "Opus 4.5 (gateway)" }
+      }
     }
-  }
+  },
+  "model": "gateway/claude-sonnet-4-5"
 }
 ```
+
+**Cursor** (Settings → Models → OpenAI API Key):
+- API Key: `ccg-local-dev-token`
+- Base URL: `http://localhost:8090/v1`
 
 **Aider:**
 ```bash
