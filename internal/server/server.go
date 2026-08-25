@@ -116,7 +116,7 @@ func (s *Server) Handler() http.Handler {
 	mux.HandleFunc("/admin/config/yaml", s.requireAuth(s.handleConfigYaml))
 	mux.HandleFunc("/admin/config/rollback", s.requireAuth(s.handleConfigRollback))
 	mux.HandleFunc("/admin/flush-cache", s.requireAuth(s.handleFlushCache))
-	return s.withRecovery(s.withCORS(s.withAccessLog(mux)))
+	return s.withRecovery(s.withCORS(s.withGzip(s.withAccessLog(mux))))
 }
 
 func (s *Server) withCORS(next http.Handler) http.Handler {
