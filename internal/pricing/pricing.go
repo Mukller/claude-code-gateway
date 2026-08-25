@@ -59,6 +59,17 @@ func (t Table) Match(model string) (Price, bool) {
 	return Price{}, false
 }
 
+func (t Table) MatchAll() map[string]Price {
+	out := map[string]Price{}
+	for k, v := range t.exact {
+		out[k] = v
+	}
+	for _, np := range t.patterns {
+		out[np.pattern] = np.price
+	}
+	return out
+}
+
 func Cost(p Price, in, out, cacheRead, cacheWrite int64) float64 {
 	c := float64(in)/1e6*p.InputPerMTok +
 		float64(out)/1e6*p.OutputPerMTok +

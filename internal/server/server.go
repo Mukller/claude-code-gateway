@@ -36,10 +36,12 @@ type Server struct {
 	rails    *guardrails
 	mcp      *mcp.Handler
 
-	storeBackend state.Store
-	cacheTTL     time.Duration
-	autoPrices   atomic.Pointer[pricing.Table]
-	tokensMu     sync.RWMutex
+	storeBackend     state.Store
+	cacheTTL         time.Duration
+	autoPrices       atomic.Pointer[pricing.Table]
+	tokensMu         sync.RWMutex
+	priceOverridesMu sync.Mutex
+	priceOverrides   map[string]pricing.Price
 
 	started    time.Time
 	tokens     map[string]bool
@@ -76,6 +78,7 @@ func New(cfg *config.Config, reg *provider.Registry, store *logstore.Store, pric
 		}
 	}
 	s.budgets = newBudgets(cfg.Clients)
+	s.priceOverrides = map[string]pricing.Price{}
 	s.mcp = s.buildMCP()
 	s.cacheTTL = cfg.Cache.TTL
 	s.initStateStore()
@@ -105,6 +108,7 @@ func (s *Server) Handler() http.Handler {
 	mux.HandleFunc("/admin/tokens/update", s.requireAuth(s.handleAdminTokensUpdate))
 	mux.HandleFunc("/admin/config", s.requireAuth(s.handleAdminConfig))
 	mux.HandleFunc("/admin/keys", s.requireAuth(s.handleAdminKeys))
+	mux.HandleFunc("/admin/prices", s.requireAuth(s.handleAdminPrices))
 	mux.HandleFunc("/admin/export.csv", s.requireAuth(s.handleExportCSV))
 	mux.HandleFunc("/admin/reload", s.requireAuth(s.handleAdminReload))
 	mux.HandleFunc("/admin/config/yaml", s.requireAuth(s.handleConfigYaml))
