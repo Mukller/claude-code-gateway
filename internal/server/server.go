@@ -109,6 +109,8 @@ func (s *Server) Handler() http.Handler {
 	mux.HandleFunc("/admin/config", s.requireAuth(s.handleAdminConfig))
 	mux.HandleFunc("/admin/keys", s.requireAuth(s.handleAdminKeys))
 	mux.HandleFunc("/admin/prices", s.requireAuth(s.handleAdminPrices))
+	mux.HandleFunc("/admin/test-provider", s.requireAuth(s.handleTestProvider))
+	mux.HandleFunc("/admin/models/detailed", s.requireAuth(s.handleModelsDetailed))
 	mux.HandleFunc("/admin/export.csv", s.requireAuth(s.handleExportCSV))
 	mux.HandleFunc("/admin/reload", s.requireAuth(s.handleAdminReload))
 	mux.HandleFunc("/admin/config/yaml", s.requireAuth(s.handleConfigYaml))
