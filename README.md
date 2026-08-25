@@ -15,6 +15,7 @@ Self-hosted AI gateway in pure Go for **Claude Code** and any OpenAI/Anthropic-c
 **Core**
 - **6 provider types**: `anthropic`, `anthropic-compat`, `openai`, `bedrock` (SigV4 + event-stream), `vertex` (api-key / bearer / service-account), `antigravity` (free Claude Opus 4.5 via Google OAuth)
 - Full **Anthropic ↔ OpenAI protocol translation**, both directions, including streaming SSE
+- **Dual protocol**: `POST /v1/messages` (Anthropic) + `POST /v1/chat/completions` (OpenAI) — works with Claude Code, OpenCode, Cursor, Aider, Continue, any OpenAI SDK
 - **Key rotation**: round-robin or fill-first, cooldown with exponential backoff, `Retry-After` respect
 - **Fallback chains** + circuit breaker (5 consecutive failures → 2 min pause)
 - **Load balancing**: `weighted` / `least_busy` / `latency` (EMA) strategies
@@ -83,6 +84,46 @@ docker run -d -p 8090:8090 \
   -v ./data:/app/data \
   -e NINE_ROUTER_KEY=sk-... \
   ghcr.io/mukller/claude-code-gateway:latest
+```
+
+## Connect any tool
+
+The gateway exposes **both** Anthropic and OpenAI protocols simultaneously:
+
+| Tool | Protocol | Base URL |
+|---|---|---|
+| Claude Code | Anthropic | `http://localhost:8090` (no `/v1`) |
+| OpenCode | OpenAI | `http://localhost:8090/v1` |
+| Cursor | OpenAI | `http://localhost:8090/v1` |
+| Aider | OpenAI | `http://localhost:8090/v1` |
+| Continue | OpenAI | `http://localhost:8090/v1` |
+| Any OpenAI SDK | OpenAI | `http://localhost:8090/v1` |
+
+**OpenCode config** (`~/.config/opencode/config.json`):
+```json
+{
+  "provider": {
+    "gateway": {
+      "apiKey": "ccg-local-dev-token",
+      "baseUrl": "http://localhost:8090/v1"
+    }
+  }
+}
+```
+
+**Aider:**
+```bash
+export OPENAI_API_BASE=http://localhost:8090/v1
+export OPENAI_API_KEY=ccg-local-dev-token
+aider --model gateway/claude-sonnet-4-5
+```
+
+**curl:**
+```bash
+curl http://localhost:8090/v1/chat/completions \
+  -H "x-api-key: ccg-local-dev-token" \
+  -H "Content-Type: application/json" \
+  -d '{"model":"claude-sonnet-4-5","messages":[{"role":"user","content":"hello"}]}'
 ```
 
 ## Provider examples

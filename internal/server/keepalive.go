@@ -9,7 +9,6 @@ import (
 func (s *Server) startKeepalive(w http.ResponseWriter, flush func(), fbw *firstByteWriter, started time.Time) chan struct{} {
 	stop := make(chan struct{})
 	if s.cfg.Server.KeepAliveSeconds <= 0 {
-		close(stop)
 		return stop
 	}
 	interval := time.Duration(s.cfg.Server.KeepAliveSeconds) * time.Second

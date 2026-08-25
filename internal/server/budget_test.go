@@ -36,6 +36,7 @@ func respondOpenAI(answer string) func(oaiCall, bool, http.ResponseWriter) {
 		json.NewEncoder(w).Encode(map[string]any{
 			"id": "c", "choices": []map[string]any{{"index": 0,
 				"message": map[string]any{"role": "assistant", "content": answer}, "finish_reason": "stop"}},
+			"usage": map[string]int{"prompt_tokens": 100, "completion_tokens": 20, "total_tokens": 120},
 		})
 	}
 }

@@ -51,7 +51,12 @@ func (s *Server) handleChatCompletions(w http.ResponseWriter, r *http.Request) {
 		writeOpenAIError(w, http.StatusForbidden, "model_not_allowed", fmt.Sprintf("model %q is not allowed", mreq.Model))
 		return
 	}
-	ci, _, _ := s.budgets.exceeded(token, time.Now())
+	ci, spent, over := s.budgets.exceeded(token, time.Now())
+	if over {
+		writeOpenAIError(w, http.StatusTooManyRequests, "budget_exceeded",
+			fmt.Sprintf("budget exceeded for client %q: $%.4f spent of $%.2f limit", ci.Name, spent, ci.Limit))
+		return
+	}
 	if !s.limiter.AllowTokens(token, est, ci.TPM, time.Now()) {
 		writeOpenAIError(w, http.StatusTooManyRequests, "rate_limit_exceeded", "TPM exceeded")
 		return
