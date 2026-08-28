@@ -246,6 +246,10 @@ func (s *Server) handleMessages(w http.ResponseWriter, r *http.Request) {
 			fmt.Sprintf("model %q is not allowed for this client", mreq.Model))
 		return
 	}
+	if blockedByFree := s.enforceFreeOnly(mreq.Model); blockedByFree != "" {
+		writeAnthropicError(w, http.StatusForbidden, "permission_error", blockedByFree)
+		return
+	}
 	ci, _, _ := s.budgets.exceeded(token, time.Now())
 	if !s.limiter.AllowTokens(token, est, ci.TPM, time.Now()) {
 		writeAnthropicError(w, http.StatusTooManyRequests, "rate_limit_error",
@@ -628,39 +632,6 @@ func (s *Server) handleCountTokens(w http.ResponseWriter, r *http.Request) {
 	}
 	n := core.EstimateRequestTokens(&mreq)
 	writeJSON(w, http.StatusOK, map[string]int64{"input_tokens": n})
-}
-
-func (s *Server) handleModels(w http.ResponseWriter, r *http.Request) {
-	if _, ok := s.checkAuth(r); !ok {
-		writeAnthropicError(w, http.StatusUnauthorized, "authentication_error", "invalid or missing API token")
-		return
-	}
-	catalog := s.reg.Catalog()
-	if r.URL.Query().Get("format") == "openai" {
-		type om struct {
-			ID      string `json:"id"`
-			Object  string `json:"object"`
-			OwnedBy string `json:"owned_by"`
-		}
-		data := make([]om, 0, len(catalog))
-		for _, e := range catalog {
-			data = append(data, om{ID: e.ID, Object: "model", OwnedBy: e.Provider})
-		}
-		writeJSON(w, http.StatusOK, map[string]any{"object": "list", "data": data})
-		return
-	}
-	type m struct {
-		Type        string `json:"type"`
-		ID          string `json:"id"`
-		DisplayName string `json:"display_name"`
-		CreatedAt   string `json:"created_at"`
-	}
-	data := make([]m, 0, len(catalog))
-	now := time.Now().UTC().Format(time.RFC3339)
-	for _, e := range catalog {
-		data = append(data, m{Type: "model", ID: e.ID, DisplayName: e.ID, CreatedAt: now})
-	}
-	writeJSON(w, http.StatusOK, map[string]any{"data": data, "has_more": false})
 }
 
 func (s *Server) handleHealth(w http.ResponseWriter, r *http.Request) {

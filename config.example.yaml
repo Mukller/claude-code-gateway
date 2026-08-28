@@ -38,6 +38,25 @@ cache:
     model: "text-embedding-3-small"
     key: "${EMBED_KEY}"
 
+  # Только-free routing: 403 на платные модели. См. README раздел "Free tier providers".
+# routing:
+#   free_only: true
+#   free_models:
+#     - "openai/*"
+#     - "deepseek/*"
+#     - "qwen/*"
+#     - "mistral/*"
+#   rules:
+#     - prefix: "free/"
+#       strip_prefix: true
+#       chain: [orcarouter, teamorouter, nara]
+#   clients:
+#     - name: dima
+#       token: "${DIMA_TOKEN}"
+#       allowed_models: ["deepseek/*", "qwen/*"]
+#       budget_usd: 5
+#       budget_period: monthly
+
 # Guardrails (Portkey-style): блокировка и лимиты на запрос/ответ
 guardrails:
   request:

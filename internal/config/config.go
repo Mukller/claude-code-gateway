@@ -24,8 +24,10 @@ type Config struct {
 	Webhooks    []Webhook   `yaml:"webhooks"`
 	Clients     []Client    `yaml:"clients"`
 	Guardrails  Guardrails  `yaml:"guardrails"`
-	State       State       `yaml:"state"`
-	PricingSync PricingSync `yaml:"pricing_sync"`
+	State         State       `yaml:"state"`
+	PricingSync   PricingSync `yaml:"pricing_sync"`
+	FreeOnly      bool        `yaml:"free_only"`
+	FreeModels    []string    `yaml:"free_models"`
 }
 
 type State struct {
@@ -132,6 +134,8 @@ type Routing struct {
 	Rules             []Rule    `yaml:"rules"`
 	Scenarios         Scenarios `yaml:"scenarios"`
 	SessionAffinity   bool      `yaml:"session_affinity"`
+	FreeOnly          bool      `yaml:"free_only"`
+	FreeModels        []string  `yaml:"free_models"`
 }
 
 type Scenarios struct {

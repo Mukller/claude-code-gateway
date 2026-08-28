@@ -1,4 +1,4 @@
-package server
+﻿package server
 
 import (
 	"crypto/sha256"
@@ -242,13 +242,6 @@ func (s *Server) tokenReports(now time.Time) []tokenReport {
 
 func round4(v float64) float64 {
 	return float64(int64(v*10000+0.5)) / 10000
-}
-
-func (s *Server) tokenLabel(token string) string {
-	if ci, ok := s.budgets.lookup(token); ok && ci.Name != "" {
-		return ci.Name
-	}
-	return maskToken(token)
 }
 
 func (s *Server) handleAdminTokens(w http.ResponseWriter, r *http.Request) {

@@ -246,6 +246,13 @@ func maskToken(t string) string {
 	return t[:10] + "..."
 }
 
+func (s *Server) tokenLabel(token string) string {
+	if ci, ok := s.budgets.lookup(token); ok && ci.Name != "" {
+		return ci.Name
+	}
+	return maskToken(token)
+}
+
 func min(a, b int) int {
 	if a < b {
 		return a

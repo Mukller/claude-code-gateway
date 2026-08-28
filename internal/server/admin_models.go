@@ -6,6 +6,8 @@ import (
 	"net/http"
 	"sort"
 	"time"
+
+	"claude-code-gateway/internal/provider"
 )
 
 func (s *Server) handleTestProvider(w http.ResponseWriter, r *http.Request) {
@@ -17,7 +19,7 @@ func (s *Server) handleTestProvider(w http.ResponseWriter, r *http.Request) {
 		Provider string `json:"provider"`
 	}
 	if err := json.NewDecoder(http.MaxBytesReader(w, r.Body, 1<<20)).Decode(&req); err != nil || req.Provider == "" {
-		writeAnthropicError(w, http.StatusBadRequest, "invalid_request_error", `{"provider":"name"}`)
+		writeAnthropicError(w, http.StatusBadRequest, "invalid_request_error", `body: {"provider":"name"}`)
 		return
 	}
 	p := s.reg.Provider(req.Provider)
@@ -25,7 +27,6 @@ func (s *Server) handleTestProvider(w http.ResponseWriter, r *http.Request) {
 		writeAnthropicError(w, http.StatusNotFound, "not_found_error", "provider not found: "+req.Provider)
 		return
 	}
-
 	ctx, cancel := context.WithTimeout(r.Context(), 15*time.Second)
 	defer cancel()
 	start := time.Now()
@@ -36,7 +37,6 @@ func (s *Server) handleTestProvider(w http.ResponseWriter, r *http.Request) {
 		"keys":     p.Pool().Len(),
 		"circuit":  p.OpenForSeconds(),
 	}
-
 	if p.Type() == "openai" || p.Type() == "antigravity" {
 		models, err := p.FetchModels(ctx)
 		result["probe_latency_ms"] = time.Since(start).Milliseconds()
@@ -56,7 +56,6 @@ func (s *Server) handleTestProvider(w http.ResponseWriter, r *http.Request) {
 		result["status"] = "skip"
 		result["note"] = "probe only for openai/antigravity types"
 	}
-
 	pi := p.Probe()
 	if !pi.At.IsZero() {
 		result["last_probe"] = map[string]any{"ok": pi.OK, "latency_ms": pi.LatencyMs, "error": pi.Error, "at": pi.At}
@@ -65,6 +64,10 @@ func (s *Server) handleTestProvider(w http.ResponseWriter, r *http.Request) {
 }
 
 func (s *Server) handleModelsDetailed(w http.ResponseWriter, r *http.Request) {
+	if _, ok := s.checkAuth(r); !ok {
+		writeAnthropicError(w, http.StatusUnauthorized, "authentication_error", "invalid or missing API token")
+		return
+	}
 	catalog := s.reg.Catalog()
 	table := s.priceTable()
 	type modelInfo struct {
@@ -87,3 +90,5 @@ func (s *Server) handleModelsDetailed(w http.ResponseWriter, r *http.Request) {
 	sort.Slice(data, func(i, j int) bool { return data[i].ID < data[j].ID })
 	writeJSON(w, http.StatusOK, map[string]any{"models": data, "count": len(data)})
 }
+
+var _ = provider.Success

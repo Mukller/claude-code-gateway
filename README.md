@@ -306,6 +306,71 @@ providers:
 Requires `opencode auth login` → Google → Antigravity (one-time).
 </details>
 
+## Free tier providers
+
+These 6 providers offer free models (registration + API key required, no payment needed). All expose OpenAI-compatible endpoints so use `type: openai` in the gateway config.
+
+| Provider | Free models | Notes |
+|---|---|---|
+| [OrcaRouter](https://www.orcarouter.ai/) | `orcarouter/free`, `deepseek/deepseek-v4-flash-free`, `deepseek/deepseek-v4-pro-free`, `qwen/qwen3.8-27b-free` | No key, no card |
+| [TeamoRouter](https://teamorouter.com/) | `deepseek-v4-flash-free`, `deepseek-v4-pro-free` | 1M context, $0 in/out |
+| [AgentRouter](https://agentrouter.org/) | `claude-opus-4-8`, `claude-opus-5`, `gpt-5.6-sol` | $125 credits on sign-up (GitHub account age matters) |
+| [Token Harbor](https://tokenharbor.ai/) | `mimo-v2.5:free`, `deepseek-v4-flash:free` | Email confirmation, 7-day free window |
+| [NaraRouter](https://router.bynara.id/) | `agnes-2.0-flash`, `agnes-2.5-flash`, `laguna-s-2.1`, `mistral-large`, `mistral-medium-3-5`, `tencent-hy3-free` | 7M tokens/day, 10 req/min — needs Telegram |
+| [FreeRouter](https://freerouter.eu.cc/) | `qwen3.8-max` | No account needed, 100 req/min |
+
+### Only-free routing
+
+To enforce a strictly free model policy (return 403 on any non-free model request), enable the gateway-level gate:
+
+```yaml
+routing:
+  free_only: true
+  free_models:
+    - "openai/*"
+    - "deepseek/*"
+    - "qwen/*"
+    - "mistral/*"
+```
+
+Any request to a model outside this list (e.g. `anthropic/claude-opus-4`) returns `403 forbidden: model X is not in free_models list`. Pattern syntax: only the suffix `*` is supported (e.g. `openai/*`, `deepseek/*`).
+
+### Example: dual-purpose setup (free + paid)
+
+```yaml
+providers:
+  - name: orcarouter
+    type: openai
+    base_url: "https://www.orcarouter.ai/api/v1"
+    keys: ["${ORCAROUTER_KEY}"]
+  - name: teamorouter
+    type: openai
+    base_url: "https://teamorouter.com/api/v1"
+    keys: ["${TEAMOROUTER_KEY}"]
+  - name: nara
+    type: openai
+    base_url: "https://router.bynara.id/api/v1"
+    keys: ["${NARA_KEY}"]
+
+routing:
+  rules:
+    - prefix: "free/"
+      strip_prefix: true
+      chain: [orcarouter, teamorouter, nara]
+
+clients:
+  - name: dima
+    token: "${DIMA_TOKEN}"
+    allowed_models:
+      - "deepseek/*"
+      - "qwen/*"
+    # 0 budget = blocked immediately, can be bumped at runtime via
+    #   curl -X POST -H "x-api-key: $ADMIN" -H "Content-Type: application/json" \
+    #        -d '{"name":"dima","budget_usd":5}' http://localhost:8090/admin/tokens/update
+    budget_usd: 0
+    budget_period: monthly
+```
+
 ## Configuration
 
 <details>
@@ -460,6 +525,9 @@ Ideas and inspiration from the best in class:
 | [Portkey Gateway](https://github.com/Portkey-AI/gateway) | Guardrails on request and response |
 | [Cloudflare AI Gateway](https://developers.cloudflare.com/ai-gateway/) | Per-request headers, cache control |
 | [CLIProxyAPI](https://github.com/router-for-me/CLIProxyAPI) | SSE keep-alive, session affinity, fill-first |
+| [Habr: 6 free AI routers](https://habr.com/ru/articles/1070906/) | list of free-tier providers, promoted to the "Free tier providers" section |
+
+Free tier providers recommended in the article: [OrcaRouter](https://www.orcarouter.ai/), [TeamoRouter](https://teamorouter.com/), [AgentRouter](https://agentrouter.org/) ($125 credits), [Token Harbor](https://tokenharbor.ai/), [NaraRouter](https://router.bynara.id/) (7M tokens/day), [FreeRouter](https://freerouter.eu.cc/). All use OpenAI-compatible endpoints and are configured as `type: openai` providers.
 
 ## License
 
