@@ -7,3 +7,6 @@ bin/
 
 gateway*.log
 req.json
+
+cover/
+cover.out
