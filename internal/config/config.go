@@ -24,10 +24,10 @@ type Config struct {
 	Webhooks    []Webhook   `yaml:"webhooks"`
 	Clients     []Client    `yaml:"clients"`
 	Guardrails  Guardrails  `yaml:"guardrails"`
-	State         State       `yaml:"state"`
-	PricingSync   PricingSync `yaml:"pricing_sync"`
-	FreeOnly      bool        `yaml:"free_only"`
-	FreeModels    []string    `yaml:"free_models"`
+	State       State       `yaml:"state"`
+	PricingSync PricingSync `yaml:"pricing_sync"`
+	FreeOnly    bool        `yaml:"free_only"`
+	FreeModels  []string    `yaml:"free_models"`
 }
 
 type State struct {

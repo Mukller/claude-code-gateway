@@ -54,6 +54,6 @@ func configWithFreeMode(t *testing.T, enabled bool, models []string) *config.Con
 	t.Helper()
 	return &config.Config{
 		Routing: config.Routing{FreeOnly: enabled, FreeModels: models},
-		Auth:     config.Auth{Tokens: []string{"x"}, AdminToken: "a"},
+		Auth:    config.Auth{Tokens: []string{"x"}, AdminToken: "a"},
 	}
 }
