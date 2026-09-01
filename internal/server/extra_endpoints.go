@@ -108,4 +108,14 @@ func (s *Server) handleCacheStats(w http.ResponseWriter, r *http.Request) {
 	})
 }
 
+func (s *Server) handleInFlight(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodGet {
+		writeAnthropicError(w, http.StatusMethodNotAllowed, "invalid_request_error", "use GET")
+		return
+	}
+	writeJSON(w, http.StatusOK, map[string]any{
+		"in_flight": s.InFlightCount(),
+	})
+}
+
 var _ = provider.Success

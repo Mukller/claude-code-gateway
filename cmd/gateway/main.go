@@ -109,11 +109,27 @@ func main() {
 	}
 
 	<-ctx.Done()
-	log.Println("shutting down...")
-	shCtx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	log.Println("shutting down: draining in-flight requests...")
+	shCtx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
 	defer cancel()
+
+	// Tell the server to wait for in-flight requests to complete, then shut down
+	// the HTTP server. The two steps run in parallel: the in-flight tracker waits
+	// for requests to finish (within 30s), while httpSrv.Shutdown stops accepting new
+	// connections and closes idle ones.
+	drainDone := make(chan struct{})
+	go func() {
+		srv.WaitForInFlight(shCtx)
+		close(drainDone)
+	}()
 	if err := httpSrv.Shutdown(shCtx); err != nil {
-		log.Printf("shutdown: %v", err)
+		log.Printf("http shutdown: %v", err)
+	}
+	select {
+	case <-drainDone:
+		log.Println("all in-flight requests completed")
+	case <-shCtx.Done():
+		log.Printf("graceful drain deadline reached, %d request(s) may have been cut", srv.InFlightCount())
 	}
 }
 

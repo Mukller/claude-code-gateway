@@ -1,6 +1,7 @@
 package server
 
 import (
+	"context"
 	"encoding/json"
 	"log"
 	"net/http"
@@ -93,6 +94,20 @@ func (s *Server) priceTable() pricing.Table {
 	return *s.prices.Load()
 }
 
+func (s *Server) WaitForInFlight(ctx context.Context) {
+	if s.inflight == nil {
+		return
+	}
+	s.inflight.wait(ctx)
+}
+
+func (s *Server) InFlightCount() int64 {
+	if s.inflight == nil {
+		return 0
+	}
+	return s.inflight.count.Load()
+}
+
 func (s *Server) Handler() http.Handler {
 	mux := http.NewServeMux()
 	mux.HandleFunc("/", s.handleIndex)
@@ -122,6 +137,7 @@ func (s *Server) Handler() http.Handler {
 	adminMux.HandleFunc("/admin/config/yaml", s.requireAuth(s.handleConfigYaml))
 	adminMux.HandleFunc("/admin/config/rollback", s.requireAuth(s.handleConfigRollback))
 	adminMux.HandleFunc("/admin/flush-cache", s.requireAuth(s.handleFlushCache))
+	adminMux.HandleFunc("/admin/inflight", s.requireAuth(s.handleInFlight))
 
 	mux.Handle("/admin/", s.withInFlight(s.adminLimiter, adminMux))
 	return s.withRecovery(s.withCORS(s.withGzip(s.withAccessLog(mux))))
