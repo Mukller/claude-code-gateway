@@ -42,6 +42,8 @@ type Server struct {
 	tokensMu         sync.RWMutex
 	priceOverridesMu sync.Mutex
 	priceOverrides   map[string]pricing.Price
+	inflight         *inFlight
+	adminLimiter     *limiter
 
 	started    time.Time
 	tokens     map[string]bool
@@ -81,6 +83,8 @@ func New(cfg *config.Config, reg *provider.Registry, store *logstore.Store, pric
 	s.priceOverrides = map[string]pricing.Price{}
 	s.mcp = s.buildMCP()
 	s.cacheTTL = cfg.Cache.TTL
+	s.inflight = newInFlight()
+	s.adminLimiter = newLimiter(120)
 	s.initStateStore()
 	return s
 }
@@ -101,24 +105,27 @@ func (s *Server) Handler() http.Handler {
 	mux.HandleFunc("/metrics", s.requireAuth(s.handleMetrics))
 	mux.HandleFunc("/admin/dashboard", s.handleDashboard)
 	mux.HandleFunc("/mcp", s.requireAuth(s.handleMCP))
-	mux.HandleFunc("/admin/stats", s.requireAuth(s.handleAdminStats))
-	mux.HandleFunc("/admin/logs", s.requireAuth(s.handleAdminLogs))
-	mux.HandleFunc("/admin/tokens", s.requireAuth(s.handleAdminTokens))
-	mux.HandleFunc("/admin/tokens/generate", s.requireAuth(s.handleTokenGenerate))
-	mux.HandleFunc("/admin/tokens/update", s.requireAuth(s.handleAdminTokensUpdate))
-	mux.HandleFunc("/admin/config", s.requireAuth(s.handleAdminConfig))
-	mux.HandleFunc("/admin/keys", s.requireAuth(s.handleAdminKeys))
-	mux.HandleFunc("/admin/prices", s.requireAuth(s.handleAdminPrices))
-	mux.HandleFunc("/admin/test-provider", s.requireAuth(s.handleTestProvider))
-	mux.HandleFunc("/admin/models/detailed", s.requireAuth(s.handleModelsDetailed))
-	mux.HandleFunc("/admin/export.csv", s.requireAuth(s.handleExportCSV))
-	mux.HandleFunc("/admin/reload", s.requireAuth(s.handleAdminReload))
-	mux.HandleFunc("/admin/config/yaml", s.requireAuth(s.handleConfigYaml))
-	mux.HandleFunc("/admin/config/rollback", s.requireAuth(s.handleConfigRollback))
-	mux.HandleFunc("/admin/flush-cache", s.requireAuth(s.handleFlushCache))
+
+	adminMux := http.NewServeMux()
+	adminMux.HandleFunc("/admin/stats", s.requireAuth(s.handleAdminStats))
+	adminMux.HandleFunc("/admin/logs", s.requireAuth(s.handleAdminLogs))
+	adminMux.HandleFunc("/admin/tokens", s.requireAuth(s.handleAdminTokens))
+	adminMux.HandleFunc("/admin/tokens/generate", s.requireAuth(s.handleTokenGenerate))
+	adminMux.HandleFunc("/admin/tokens/update", s.requireAuth(s.handleAdminTokensUpdate))
+	adminMux.HandleFunc("/admin/config", s.requireAuth(s.handleAdminConfig))
+	adminMux.HandleFunc("/admin/keys", s.requireAuth(s.handleAdminKeys))
+	adminMux.HandleFunc("/admin/prices", s.requireAuth(s.handleAdminPrices))
+	adminMux.HandleFunc("/admin/test-provider", s.requireAuth(s.handleTestProvider))
+	adminMux.HandleFunc("/admin/models/detailed", s.requireAuth(s.handleModelsDetailed))
+	adminMux.HandleFunc("/admin/export.csv", s.requireAuth(s.handleExportCSV))
+	adminMux.HandleFunc("/admin/reload", s.requireAuth(s.handleAdminReload))
+	adminMux.HandleFunc("/admin/config/yaml", s.requireAuth(s.handleConfigYaml))
+	adminMux.HandleFunc("/admin/config/rollback", s.requireAuth(s.handleConfigRollback))
+	adminMux.HandleFunc("/admin/flush-cache", s.requireAuth(s.handleFlushCache))
+
+	mux.Handle("/admin/", s.withInFlight(s.adminLimiter, adminMux))
 	return s.withRecovery(s.withCORS(s.withGzip(s.withAccessLog(mux))))
 }
-
 func (s *Server) withCORS(next http.Handler) http.Handler {
 	allowed := s.cfg.Server.CORSOrigins
 	if len(allowed) == 0 {
